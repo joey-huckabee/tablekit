@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/tablekit", "crates/tablekit-csv", "crates/tablekit-parquet"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.85"
 license = "UNLICENSED"
@@ -13,6 +13,10 @@ publish = false
 [workspace.dependencies]
 tablekit = { path = "crates/tablekit" }
 tablekit-csv = { path = "crates/tablekit-csv" }
+# Shortest float digits (ties to even, as NumPy) and integer digits, formatted on the stack:
+# the CSV hot path. Both by David Tolnay, widely used, no dependencies of their own.
+ryu = "1.0.23"
+itoa = "1.0.18"
 # 59.3.0 (2026-09-01): 60.0.0 needs Rust 1.88, and 59.3.1 was under two weeks old when this
 # was chosen. Exact, so every user resolves the same writer. No Arrow layer: the column
 # writers are used directly. Snappy only, the compression Impala uses by default.

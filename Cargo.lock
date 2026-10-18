@@ -198,6 +198,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "itoa"
+version = "1.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+
+[[package]]
 name = "js-sys"
 version = "0.3.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -317,6 +323,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
 name = "seq-macro"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -364,18 +376,20 @@ dependencies = [
 
 [[package]]
 name = "tablekit"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "tablekit-csv"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
+ "itoa",
+ "ryu",
  "tablekit",
 ]
 
 [[package]]
 name = "tablekit-parquet"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "parquet",
  "tablekit",
