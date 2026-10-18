@@ -5,6 +5,26 @@ All notable changes to this repository are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). A change to what is written is
 called out under **Format**.
 
+## [0.3.0] - 2026-10-18
+
+### Changed (breaking)
+
+- `CsvOptions::bom` is replaced by `CsvOptions::encoding`, an `Encoding`: `Utf8` (the
+  default) or `Utf8Sig`, parsed from Python's names (`"utf-8"`, `"utf-8-sig"`) as pandas'
+  `encoding` takes them. Other encodings can be added without another interface change.
+
+### Added
+
+- `tablekit::Value`, one borrowed value of a row, and `Column::value(row)`.
+- `CsvFormat`: formats the header and each row (a slice of `Value`s, checked against the
+  columns) into the caller's buffer, for a tool that writes each record as it reads it with
+  no allocation per row. `CsvWriter` is built on it, and gains `write_row`.
+- `TableError::RowLength` and `TableError::ValueType`.
+
+### Format
+
+- Unchanged. The expected file `table-bom.csv` is now `table-utf-8-sig.csv`.
+
 ## [0.2.0] - 2026-10-18
 
 ### Added

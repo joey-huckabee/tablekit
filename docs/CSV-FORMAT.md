@@ -17,7 +17,7 @@ itself (`make.py` there), and tablekit's tests compare against them byte for byt
 
 | | Written as |
 |---|---|
-| Encoding | UTF-8, no byte-order mark (option `bom`) |
+| Encoding | UTF-8, no byte-order mark (option `encoding`: `utf-8-sig` adds one) |
 | First line | The column names |
 | Then | One line per row, the columns in order |
 | Separator | `,` |
@@ -70,10 +70,14 @@ requires tablekit to write every one identically.
 |---|---|---|
 | `na_rep` | empty | `na_rep` |
 | `line_ending` | `CrLf` | `lineterminator`: `"\r\n"` on Windows, `"\n"` elsewhere |
-| `bom` | `false` | `encoding="utf-8-sig"` |
+| `encoding` | `utf-8` | `encoding`: `"utf-8"`, or `"utf-8-sig"` for a byte-order mark, which Excel needs to show non-ASCII text |
 
 The default line ending is CRLF on every system, so the same table gives the same bytes
 everywhere. pandas uses the system's line ending; on Linux, choose `Lf` to match it.
+
+Encoding names are Python's, matched as Python matches them: case, `-` and `_` aside
+(`"UTF-8"`, `"utf_8_sig"`). An encoding tablekit does not write is refused, with the list of
+those it does; more can be added without changing the interface.
 
 ## Where tablekit differs from pandas
 

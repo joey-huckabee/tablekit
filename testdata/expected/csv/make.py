@@ -26,7 +26,7 @@ table = pd.DataFrame(
 )
 
 table.to_csv("table.csv", index=False, lineterminator="\r\n")
-table.to_csv("table-bom.csv", index=False, lineterminator="\r\n", encoding="utf-8-sig")
+table.to_csv("table-utf-8-sig.csv", index=False, lineterminator="\r\n", encoding="utf-8-sig")
 table.to_csv("table-na.csv", index=False, lineterminator="\r\n", na_rep="NA")
 table.to_csv("table-lf.csv", index=False, lineterminator="\n")
 
