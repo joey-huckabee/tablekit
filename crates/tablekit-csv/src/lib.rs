@@ -163,7 +163,6 @@ const FLUSH_AT: usize = 1 << 20;
 pub struct CsvFormat {
     schema: Vec<Field>,
     options: CsvOptions,
-    scratch: Vec<u8>,
 }
 
 impl CsvFormat {
@@ -176,11 +175,7 @@ impl CsvFormat {
         if schema.is_empty() {
             return Err(TableError::NoColumns);
         }
-        Ok(CsvFormat {
-            schema,
-            options,
-            scratch: Vec::with_capacity(64),
-        })
+        Ok(CsvFormat { schema, options })
     }
 
     /// The columns.
@@ -269,8 +264,8 @@ impl CsvFormat {
             Value::F64(x) if x.is_nan() => text(out, &self.options.na_rep),
             Value::F32(x) if x.is_infinite() => infinity(out, x > 0.0),
             Value::F64(x) if x.is_infinite() => infinity(out, x > 0.0),
-            Value::F32(x) => float::write_f32(out, &mut self.scratch, x),
-            Value::F64(x) => float::write_f64(out, &mut self.scratch, x),
+            Value::F32(x) => float::write_f32(out, x),
+            Value::F64(x) => float::write_f64(out, x),
             Value::Text(s) => text(out, s),
         }
     }
@@ -376,10 +371,11 @@ impl<W: Write> CsvWriter<W> {
     }
 }
 
+/// Appends an integer's decimal digits, formatted on the stack by `itoa`.
 // HOT PATH: per value.
 #[inline]
-fn integer(out: &mut Vec<u8>, v: impl std::fmt::Display) {
-    let _ = write!(out, "{v}");
+fn integer(out: &mut Vec<u8>, v: impl itoa::Integer) {
+    out.extend_from_slice(itoa::Buffer::new().format(v).as_bytes());
 }
 
 #[inline]

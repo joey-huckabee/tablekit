@@ -5,6 +5,22 @@ All notable changes to this repository are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). A change to what is written is
 called out under **Format**.
 
+## [0.3.1] - 2026-10-18
+
+### Changed
+
+- CSV numbers are formatted by `ryu` (floats) and `itoa` (integers) on the stack, instead of
+  through Rust's formatting machinery: a sluice dump row is formatted about as fast as
+  sluice's own hand-written CSV was (0.640 s against 0.648 s for a 738,433-record capture,
+  best of seven), where 0.3.0 took about half as long again. Ryu also takes the even digit
+  when two shortest forms are equally close, as NumPy does, so 0.3.0's second formatting
+  pass for that case is gone.
+
+### Format
+
+- Unchanged: the same bytes for every value, checked against the NumPy corpus and against
+  0.3.0's output for the capture above.
+
 ## [0.3.0] - 2026-10-18
 
 ### Changed (breaking)

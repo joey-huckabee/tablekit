@@ -9,8 +9,11 @@
 //! Positional always has a decimal point (`123.0`, `0.0001`); scientific has one only with
 //! more than one digit, and an exponent with a sign and at least two digits (`1e-05`,
 //! `1.2345679e+08`, `1e-300`). Checked against NumPy's output in `testdata/floats/`.
-
-use std::io::Write as _;
+//!
+//! The digits come from Ryū (the `ryu` crate), which finds the shortest digits with no
+//! allocation and, where two are equally short and equally close, takes the even one, as
+//! Python and NumPy do. (Rust's own `{:e}` takes the upper one there, and costs about twice as
+//! much.)
 
 /// Below this magnitude, scientific notation.
 const POSITIONAL_MIN: f64 = 1e-4;
@@ -18,107 +21,96 @@ const POSITIONAL_MIN: f64 = 1e-4;
 const POSITIONAL_MAX_F64: f64 = 1e16;
 const POSITIONAL_MAX_F32: f64 = 1e6;
 
-/// Appends finite `v` to `out`; `scratch` is reused between calls so nothing is allocated.
+/// Appends finite `v` to `out`.
 // HOT PATH: per value.
-pub(crate) fn write_f64(out: &mut Vec<u8>, scratch: &mut Vec<u8>, v: f64) {
-    scratch.clear();
-    let _ = write!(scratch, "{v:e}");
-    let digits = mantissa_digits(scratch);
-    if digits > 1 {
-        // Rust's shortest digits break a tie between two equally short, equally close
-        // candidates upward; Python and NumPy break it to the even digit, as Rust's
-        // fixed-precision formatting does. Format again to that many digits, and keep it
-        // if it reads back as `v` (the closest such number always should).
-        let len = scratch.len();
-        let _ = write!(scratch, "{:.*e}", digits - 1, v);
-        let same = std::str::from_utf8(&scratch[len..])
-            .ok()
-            .and_then(|s| s.parse::<f64>().ok())
-            .is_some_and(|back| back.to_bits() == v.to_bits());
-        if same {
-            scratch.drain(..len);
-        } else {
-            scratch.truncate(len);
-        }
-    }
-    lay_out(out, scratch, positional(v.abs(), POSITIONAL_MAX_F64));
+#[inline]
+pub(crate) fn write_f64(out: &mut Vec<u8>, v: f64) {
+    let mut buffer = ryu::Buffer::new();
+    let text = buffer.format_finite(v);
+    lay_out(
+        out,
+        text.as_bytes(),
+        positional(v.abs(), POSITIONAL_MAX_F64),
+    );
 }
 
 /// Appends finite `v` to `out`, with `f32`'s shortest digits and cutoffs.
 // HOT PATH: per value.
-pub(crate) fn write_f32(out: &mut Vec<u8>, scratch: &mut Vec<u8>, v: f32) {
-    scratch.clear();
-    let _ = write!(scratch, "{v:e}");
-    let digits = mantissa_digits(scratch);
-    if digits > 1 {
-        // As in `write_f64`.
-        let len = scratch.len();
-        let _ = write!(scratch, "{:.*e}", digits - 1, v);
-        let same = std::str::from_utf8(&scratch[len..])
-            .ok()
-            .and_then(|s| s.parse::<f32>().ok())
-            .is_some_and(|back| back.to_bits() == v.to_bits());
-        if same {
-            scratch.drain(..len);
-        } else {
-            scratch.truncate(len);
-        }
-    }
+#[inline]
+pub(crate) fn write_f32(out: &mut Vec<u8>, v: f32) {
+    let mut buffer = ryu::Buffer::new();
+    let text = buffer.format_finite(v);
     lay_out(
         out,
-        scratch,
+        text.as_bytes(),
         positional(f64::from(v.abs()), POSITIONAL_MAX_F32),
     );
-}
-
-/// The number of significant digits in Rust's `{:e}` form (`-1.25e3` has 3).
-fn mantissa_digits(sci: &[u8]) -> usize {
-    sci.iter()
-        .take_while(|&&b| b != b'e')
-        .filter(|b| b.is_ascii_digit())
-        .count()
 }
 
 fn positional(abs: f64, max: f64) -> bool {
     abs == 0.0 || (POSITIONAL_MIN..max).contains(&abs)
 }
 
-/// Rewrites Rust's `{:e}` form (`-1.2345e-7`: sign, digits with an optional point, `e`,
-/// exponent) in NumPy's layout.
+/// Rewrites Ryū's text (`-1.5`, `0.0001`, `1e16`, `1.234e-7`: a sign, digits with an optional
+/// point, an optional `e` and exponent) in NumPy's layout.
 // HOT PATH: per value.
-fn lay_out(out: &mut Vec<u8>, sci: &[u8], positional: bool) {
-    let (negative, sci) = match sci.split_first() {
+fn lay_out(out: &mut Vec<u8>, text: &[u8], positional: bool) {
+    let (negative, text) = match text.split_first() {
         Some((b'-', rest)) => (true, rest),
-        _ => (false, sci),
+        _ => (false, text),
     };
-    let e_at = sci.iter().position(|&b| b == b'e').unwrap_or(sci.len());
-    let (mantissa, exponent) = sci.split_at(e_at);
+    let e_at = text.iter().position(|&b| b == b'e').unwrap_or(text.len());
+    let (mantissa, exponent) = text.split_at(e_at);
     let exponent = parse_exponent(exponent.get(1..).unwrap_or_default());
-    let first = mantissa.first().copied().unwrap_or(b'0');
-    let rest = mantissa.get(2..).unwrap_or_default(); // after `d.`
-    let digits = 1 + rest.len();
-    let digit = |i: usize| if i == 0 { first } else { rest[i - 1] };
+
+    // The significant digits, without the point or leading and trailing zeros, and where
+    // the point falls among them: the value is 0.DIGITS x 10^point.
+    let mut digits = [0u8; 32];
+    let mut count = 0;
+    let mut point = exponent;
+    let mut seen_point = false;
+    for &b in mantissa {
+        if b == b'.' {
+            seen_point = true;
+        } else if count == 0 && b == b'0' {
+            if seen_point {
+                point -= 1;
+            }
+        } else if count < digits.len() {
+            digits[count] = b;
+            count += 1;
+            if !seen_point {
+                point += 1;
+            }
+        }
+    }
+    while count > 0 && digits[count - 1] == b'0' {
+        count -= 1;
+    }
+    let digits = &digits[..count];
 
     if negative {
         out.push(b'-');
     }
+    let Some((&first, rest)) = digits.split_first() else {
+        out.extend_from_slice(b"0.0");
+        return;
+    };
     if positional {
-        // The value is 0.DIGITS x 10^point.
-        let point = exponent + 1;
         if point <= 0 {
             out.extend_from_slice(b"0.");
             out.extend(std::iter::repeat_n(b'0', point.unsigned_abs() as usize));
-            out.extend((0..digits).map(digit));
+            out.extend_from_slice(digits);
         } else {
             let point = point.unsigned_abs() as usize;
-            if point >= digits {
-                out.extend((0..digits).map(digit));
-                out.extend(std::iter::repeat_n(b'0', point - digits));
+            if point >= digits.len() {
+                out.extend_from_slice(digits);
+                out.extend(std::iter::repeat_n(b'0', point - digits.len()));
                 out.extend_from_slice(b".0");
             } else {
-                out.extend((0..point).map(digit));
+                out.extend_from_slice(&digits[..point]);
                 out.push(b'.');
-                out.extend((point..digits).map(digit));
+                out.extend_from_slice(&digits[point..]);
             }
         }
     } else {
@@ -127,13 +119,14 @@ fn lay_out(out: &mut Vec<u8>, sci: &[u8], positional: bool) {
             out.push(b'.');
             out.extend_from_slice(rest);
         }
+        let e = point - 1;
         out.push(b'e');
-        out.push(if exponent < 0 { b'-' } else { b'+' });
-        let e = exponent.unsigned_abs();
+        out.push(if e < 0 { b'-' } else { b'+' });
+        let e = e.unsigned_abs();
         if e < 10 {
             out.push(b'0');
         }
-        let _ = write!(out, "{e}");
+        out.extend_from_slice(itoa::Buffer::new().format(e).as_bytes());
     }
 }
 
@@ -153,14 +146,14 @@ mod tests {
     use super::*;
 
     fn f64s(v: f64) -> String {
-        let (mut out, mut scratch) = (Vec::new(), Vec::new());
-        write_f64(&mut out, &mut scratch, v);
+        let mut out = Vec::new();
+        write_f64(&mut out, v);
         String::from_utf8(out).unwrap()
     }
 
     fn f32s(v: f32) -> String {
-        let (mut out, mut scratch) = (Vec::new(), Vec::new());
-        write_f32(&mut out, &mut scratch, v);
+        let mut out = Vec::new();
+        write_f32(&mut out, v);
         String::from_utf8(out).unwrap()
     }
 
@@ -181,6 +174,7 @@ mod tests {
             (5e-324, "5e-324"),
             (1e-300, "1e-300"),
             (-2.5e-3, "-0.0025"),
+            (-1_275_969_321_916_370.2, "-1275969321916370.2"),
         ];
         for &(v, want) in cases {
             assert_eq!(f64s(v), want, "{v:?}");
@@ -196,6 +190,7 @@ mod tests {
             (3.4e38, "3.4e+38"),
             (1e-45, "1e-45"),
             (-0.0, "-0.0"),
+            (354_853.62, "354853.62"),
         ];
         for &(v, want) in cases {
             assert_eq!(f32s(v), want, "{v:?}");
