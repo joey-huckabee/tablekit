@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# Rejects tool-attribution trailers.
+#
+# AGENTS.md: commit messages are the human-authored record of intent; tool attribution
+# belongs in tool logs, not in history. Agent tooling defaults to adding these, so the rule
+# needs something actively checking it rather than goodwill.
+#
+# Install once per clone:  git config core.hooksPath .githooks
+# Bypass deliberately:     git commit --no-verify
+
+set -e
+
+msg_file="$1"
+[ -f "$msg_file" ] || exit 0
+
+RED=''; BOLD=''; OFF=''
+if [ -t 2 ]; then
+  RED=$(printf '\033[31m'); BOLD=$(printf '\033[1m'); OFF=$(printf '\033[0m')
+fi
+
+# Comment lines are stripped by git before the message is stored, so a Co-Authored-By
+# inside the commented template - or inside a diff shown by `git commit -v` - is not a
+# trailer and must not be flagged.
+body=$(grep -v '^#' "$msg_file" || true)
+
+matches=$(printf '%s\n' "$body" | grep -n -i -E '^[[:space:]]*Co-Authored-By:.*(Claude|Anthropic|noreply@anthropic\.com)' || true)
+
+if [ -n "$matches" ]; then
+  printf '%s\n' "${RED}${BOLD}commit-msg: the message carries a tool-attribution trailer.${OFF}" >&2
+  printf '\n' >&2
+  printf '%s\n' "$matches" | sed 's/^/    /' >&2
+  printf '\n' >&2
+  printf '%s\n' "  AGENTS.md: commit messages are the human-authored record of intent;" >&2
+  printf '%s\n' "  tool attribution belongs in tool logs, not history." >&2
+  printf '\n' >&2
+  printf '%s\n' "  Remove the trailer and commit again." >&2
+  printf '%s\n' "  Deliberate? Commit again with --no-verify." >&2
+  exit 1
+fi
+
+exit 0

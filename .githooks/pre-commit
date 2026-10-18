@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# Refuses a commit made directly on main.
+#
+# main is treated as protected in this repository (AGENTS.md). Branch protection is not
+# available on this plan for a private repository, so this hook is the only thing enforcing it.
+#
+# Install once per clone:  git config core.hooksPath .githooks
+# Bypass deliberately:     git commit --no-verify
+
+set -e
+
+RED=''; BOLD=''; OFF=''
+if [ -t 2 ]; then
+  RED=$(printf '\033[31m'); BOLD=$(printf '\033[1m'); OFF=$(printf '\033[0m')
+fi
+
+# A detached HEAD returns nothing and is left alone - rebases and bisects run hooks too.
+branch=$(git symbolic-ref --short -q HEAD || true)
+
+if [ "$branch" = "main" ]; then
+  printf '%s\n' "${RED}${BOLD}pre-commit: refusing to commit on main.${OFF}" >&2
+  printf '%s\n' "" \
+    "  main is treated as protected in this repository (AGENTS.md). Branch" \
+    "  protection is not available on this plan, so this hook is the only thing" \
+    "  enforcing it. Land the work through a pull request instead:" \
+    "" \
+    "      git switch -c <type>/<short-name>" \
+    "      git commit ..." \
+    "      gh pr create" \
+    "" \
+    "  Deliberate? Commit again with --no-verify." >&2
+  exit 1
+fi
+
+exit 0
