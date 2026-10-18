@@ -26,6 +26,12 @@ capture, through FATMOPs-Binary's `perf/`. Then:
   Finished files stay; unfinished ones are removed (`write_atomically` already does this per
   file).
 - **The same bytes either way**: a test writes with one worker and with many and compares.
+- **Evaluated with and without threads** (owner, 2026-10-18): starting workers, handing
+  batches between them and keeping the output in order cost something, and for a small
+  table or a single label that can outweigh the gain. Time the serial and the concurrent
+  engine side by side, from tiny tables to large ones, measure the fixed cost of starting
+  the workers on its own, and use the concurrent one only where it wins (possibly above a
+  size threshold). sluice's threaded dump (its roadmap) is held to the same test.
 - **Its `perf/` case** in FATMOPs-Binary: serial against concurrent, with and without the
   index, Rust against Python.
 
