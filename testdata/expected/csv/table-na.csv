@@ -1,0 +1,6 @@
+time,flag,small,count,offset,level,edge,note,Mode,Pos.X
+0.5,True,-128,18446744073709551615,-9223372036854775808,0.1,inf,plain,On,1
+1e-05,False,0,0,9223372036854775807,1e-04,-inf,"a, b",NA,-2
+1e+16,True,127,1,-1,3.4e+38,0.0,"say ""hi""",Off,3
+123.0,False,5,2,0,NA,-0.0,"two
+lines",,-4
