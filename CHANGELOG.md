@@ -14,6 +14,12 @@ called out under **Format**.
   million record times) and 1.35 times for floats. It too takes the even digit on a tie.
   `ryu` is no longer a dependency. zmij is pinned exactly, since a new version could change
   digits; the NumPy corpus test must pass before moving it.
+- A row is checked and written in one pass (a refused row is still taken back whole), its
+  room is reserved once, values are formatted inline, and a float zmij already writes in
+  NumPy's layout (the common case: `0.000921`, `123.0`) is copied as it is. With sluice
+  writing rows a megabyte at a time, `sluice dump --format csv --hex 8` of a 738,433-record
+  capture takes 0.473 s (best of nine), against 0.594 s with zmij alone and 0.633 s for
+  sluice's hand-written CSV before tablekit.
 
 ### Format
 

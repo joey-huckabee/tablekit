@@ -27,12 +27,8 @@ const POSITIONAL_MAX_F32: f64 = 1e6;
 #[inline]
 pub(crate) fn write_f64(out: &mut Vec<u8>, v: f64) {
     let mut buffer = zmij::Buffer::new();
-    let text = buffer.format_finite(v);
-    lay_out(
-        out,
-        text.as_bytes(),
-        positional(v.abs(), POSITIONAL_MAX_F64),
-    );
+    let text = buffer.format_finite(v).as_bytes();
+    write(out, text, positional(v.abs(), POSITIONAL_MAX_F64));
 }
 
 /// Appends finite `v` to `out`, with `f32`'s shortest digits and cutoffs.
@@ -40,12 +36,27 @@ pub(crate) fn write_f64(out: &mut Vec<u8>, v: f64) {
 #[inline]
 pub(crate) fn write_f32(out: &mut Vec<u8>, v: f32) {
     let mut buffer = zmij::Buffer::new();
-    let text = buffer.format_finite(v);
-    lay_out(
+    let text = buffer.format_finite(v).as_bytes();
+    write(
         out,
-        text.as_bytes(),
+        text,
         positional(f64::from(v.abs()), POSITIONAL_MAX_F32),
     );
+}
+
+/// Appends zmij's `text` in NumPy's layout. In the positional range zmij's text without an
+/// exponent is already NumPy's (`0.000921`, `123.0`, `-0.0`), so it is copied as it is: the
+/// common case for times and measurements. Anything else is laid out digit by digit.
+// HOT PATH: per value.
+#[inline]
+fn write(out: &mut Vec<u8>, text: &[u8], positional: bool) {
+    // zmij writes an exponent last (`e+16`, `e-7`, `e-324`), so only the tail can hold one.
+    let tail = &text[text.len().saturating_sub(5)..];
+    if positional && !tail.iter().any(|&b| b == b'e') {
+        out.extend_from_slice(text);
+    } else {
+        lay_out(out, text, positional);
+    }
 }
 
 fn positional(abs: f64, max: f64) -> bool {
