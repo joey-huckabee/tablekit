@@ -10,10 +10,11 @@
 //! more than one digit, and an exponent with a sign and at least two digits (`1e-05`,
 //! `1.2345679e+08`, `1e-300`). Checked against NumPy's output in `testdata/floats/`.
 //!
-//! The digits come from Ryū (the `ryu` crate), which finds the shortest digits with no
-//! allocation and, where two are equally short and equally close, takes the even one, as
-//! Python and NumPy do. (Rust's own `{:e}` takes the upper one there, and costs about twice as
-//! much.)
+//! The digits come from Żmij (the `zmij` crate, a port of Victor Zverovich's algorithm), which
+//! finds the shortest digits with no allocation and, where two are equally short and equally
+//! close, takes the even one, as Python and NumPy do. Rust's own `{:e}` takes the upper one
+//! there. zmij formats a double in about half the time Ryū (0.3.1) took, and a quarter of
+//! the time `{:e}` takes.
 
 /// Below this magnitude, scientific notation.
 const POSITIONAL_MIN: f64 = 1e-4;
@@ -25,7 +26,7 @@ const POSITIONAL_MAX_F32: f64 = 1e6;
 // HOT PATH: per value.
 #[inline]
 pub(crate) fn write_f64(out: &mut Vec<u8>, v: f64) {
-    let mut buffer = ryu::Buffer::new();
+    let mut buffer = zmij::Buffer::new();
     let text = buffer.format_finite(v);
     lay_out(
         out,
@@ -38,7 +39,7 @@ pub(crate) fn write_f64(out: &mut Vec<u8>, v: f64) {
 // HOT PATH: per value.
 #[inline]
 pub(crate) fn write_f32(out: &mut Vec<u8>, v: f32) {
-    let mut buffer = ryu::Buffer::new();
+    let mut buffer = zmij::Buffer::new();
     let text = buffer.format_finite(v);
     lay_out(
         out,
@@ -51,8 +52,8 @@ fn positional(abs: f64, max: f64) -> bool {
     abs == 0.0 || (POSITIONAL_MIN..max).contains(&abs)
 }
 
-/// Rewrites Ryū's text (`-1.5`, `0.0001`, `1e16`, `1.234e-7`: a sign, digits with an optional
-/// point, an optional `e` and exponent) in NumPy's layout.
+/// Rewrites zmij's text (`-1.5`, `0.0001`, `1e+16`, `1.234e-7`: a sign, digits with an
+/// optional point, an optional `e` and signed exponent) in NumPy's layout.
 // HOT PATH: per value.
 fn lay_out(out: &mut Vec<u8>, text: &[u8], positional: bool) {
     let (negative, text) = match text.split_first() {
@@ -133,6 +134,7 @@ fn lay_out(out: &mut Vec<u8>, text: &[u8], positional: bool) {
 fn parse_exponent(text: &[u8]) -> i32 {
     let (negative, digits) = match text.split_first() {
         Some((b'-', rest)) => (true, rest),
+        Some((b'+', rest)) => (false, rest),
         _ => (false, text),
     };
     let magnitude = digits

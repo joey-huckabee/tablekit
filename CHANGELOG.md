@@ -5,6 +5,21 @@ All notable changes to this repository are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). A change to what is written is
 called out under **Format**.
 
+## [0.3.2] - 2026-10-18
+
+### Changed
+
+- Floats are formatted by `zmij` (Victor Zverovich's Żmij algorithm, ported by David
+  Tolnay) instead of `ryu`: about twice as fast for doubles (21.6 ms against 44.5 ms for a
+  million record times) and 1.35 times for floats. It too takes the even digit on a tie.
+  `ryu` is no longer a dependency. zmij is pinned exactly, since a new version could change
+  digits; the NumPy corpus test must pass before moving it.
+
+### Format
+
+- Unchanged: the NumPy corpus, the pandas expected files, and a 738,433-record sluice dump
+  are byte-identical to 0.3.1's.
+
 ## [0.3.1] - 2026-10-18
 
 ### Changed

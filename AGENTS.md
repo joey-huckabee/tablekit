@@ -68,7 +68,7 @@ ROADMAP.md               what comes next, and the analysis behind it
   are denied by lint outside tests. A table comes from another program; check it.
 - **Files are written whole or not at all**: to a temporary file beside the target, renamed
   into place only when complete.
-- **Dependencies are few and named.** `tablekit` has none. `tablekit-csv` uses `ryu` and
+- **Dependencies are few and named.** `tablekit` has none. `tablekit-csv` uses `zmij` and
   `itoa` (shortest float digits and integer digits, formatted on the stack). `tablekit-parquet`
   uses the `parquet` crate without its Arrow layer.
 - Clippy pedantic is on; keep the workspace warning-free.

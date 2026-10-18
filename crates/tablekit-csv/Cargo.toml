@@ -11,7 +11,7 @@ publish.workspace = true
 [dependencies]
 tablekit.workspace = true
 itoa.workspace = true
-ryu.workspace = true
+zmij.workspace = true
 
 [lints]
 workspace = true
