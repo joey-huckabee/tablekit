@@ -217,6 +217,86 @@ impl Column {
     pub fn has_missing(&self) -> bool {
         self.present.is_some()
     }
+
+    /// Row `row`'s value: [`Value::Missing`] where it has none, or past the last row.
+    // HOT PATH: per value.
+    #[must_use]
+    #[inline]
+    pub fn value(&self, row: usize) -> Value<'_> {
+        if !self.is_present(row) {
+            return Value::Missing;
+        }
+        let v = match &self.values {
+            Values::Bool(v) => v.get(row).map(|&x| Value::Bool(x)),
+            Values::I8(v) => v.get(row).map(|&x| Value::I8(x)),
+            Values::I16(v) => v.get(row).map(|&x| Value::I16(x)),
+            Values::I32(v) => v.get(row).map(|&x| Value::I32(x)),
+            Values::I64(v) => v.get(row).map(|&x| Value::I64(x)),
+            Values::U8(v) => v.get(row).map(|&x| Value::U8(x)),
+            Values::U16(v) => v.get(row).map(|&x| Value::U16(x)),
+            Values::U32(v) => v.get(row).map(|&x| Value::U32(x)),
+            Values::U64(v) => v.get(row).map(|&x| Value::U64(x)),
+            Values::F32(v) => v.get(row).map(|&x| Value::F32(x)),
+            Values::F64(v) => v.get(row).map(|&x| Value::F64(x)),
+            Values::Text(v) => v.get(row).map(|x| Value::Text(x)),
+        };
+        v.unwrap_or(Value::Missing)
+    }
+}
+
+/// One value of one row, borrowed: what a writer that takes a table a row at a time (such
+/// as `tablekit_csv::CsvFormat`) is given, so a tool can write each record as it reads it
+/// without building columns.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Value<'a> {
+    /// No value; any column may have one.
+    Missing,
+    /// See [`DataType::Bool`].
+    Bool(bool),
+    /// See [`DataType::I8`].
+    I8(i8),
+    /// See [`DataType::I16`].
+    I16(i16),
+    /// See [`DataType::I32`].
+    I32(i32),
+    /// See [`DataType::I64`].
+    I64(i64),
+    /// See [`DataType::U8`].
+    U8(u8),
+    /// See [`DataType::U16`].
+    U16(u16),
+    /// See [`DataType::U32`].
+    U32(u32),
+    /// See [`DataType::U64`].
+    U64(u64),
+    /// See [`DataType::F32`].
+    F32(f32),
+    /// See [`DataType::F64`].
+    F64(f64),
+    /// See [`DataType::Text`].
+    Text(&'a str),
+}
+
+impl Value<'_> {
+    /// The type of the value; `None` for [`Value::Missing`], which fits any column.
+    #[must_use]
+    pub fn data_type(&self) -> Option<DataType> {
+        Some(match self {
+            Value::Missing => return None,
+            Value::Bool(_) => DataType::Bool,
+            Value::I8(_) => DataType::I8,
+            Value::I16(_) => DataType::I16,
+            Value::I32(_) => DataType::I32,
+            Value::I64(_) => DataType::I64,
+            Value::U8(_) => DataType::U8,
+            Value::U16(_) => DataType::U16,
+            Value::U32(_) => DataType::U32,
+            Value::U64(_) => DataType::U64,
+            Value::F32(_) => DataType::F32,
+            Value::F64(_) => DataType::F64,
+            Value::Text(_) => DataType::Text,
+        })
+    }
 }
 
 /// A column's name and type.
@@ -310,6 +390,22 @@ pub enum TableError {
     },
     /// Two columns with one name, which the format does not allow.
     DuplicateName(String),
+    /// A row has a different number of values from the table's columns.
+    RowLength {
+        /// The table's columns.
+        expected: usize,
+        /// The row's values.
+        found: usize,
+    },
+    /// A row's value is not of its column's type.
+    ValueType {
+        /// The column.
+        column: String,
+        /// The column's type.
+        expected: DataType,
+        /// The value's.
+        found: DataType,
+    },
     /// Reading or writing failed.
     Io(io::Error),
     /// The format's own writer failed (Parquet), with its message.
@@ -346,6 +442,18 @@ impl fmt::Display for TableError {
                     "two columns are named {name}, which the format does not allow"
                 )
             }
+            TableError::RowLength { expected, found } => write!(
+                f,
+                "a row has {found} values, but the table has {expected} columns"
+            ),
+            TableError::ValueType {
+                column,
+                expected,
+                found,
+            } => write!(
+                f,
+                "column {column} holds {expected:?}, but a row gives it {found:?}"
+            ),
             TableError::Io(e) => write!(f, "{e}"),
             TableError::Format(e) => write!(f, "{e}"),
         }

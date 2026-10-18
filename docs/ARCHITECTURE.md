@@ -205,7 +205,7 @@ Made with the owner on 2026-10-18.
 | Booleans | Booleans: `True` and `False` in CSV, `BOOLEAN` in Parquet |
 | CSV in general | What pandas writes by default, because that is what users expect: see [CSV-FORMAT.md](CSV-FORMAT.md) |
 | Line endings | CRLF, as pandas writes on Windows (and as RFC 4180 specifies); LF as an option |
-| Byte-order mark | None by default, as pandas; an option, like pandas' `encoding="utf-8-sig"` |
+| Byte-order mark | None by default, as pandas; `encoding="utf-8-sig"` adds one, named as pandas names it (0.3.0; 0.1.0 had a `bom` flag), so other encodings can follow without another interface change |
 | Missing values | An empty cell, configurable like pandas' `na_rep` |
 | Parquet | In tablekit too, in the first release |
 | Concurrency | After the first release |

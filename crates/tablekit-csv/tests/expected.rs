@@ -3,8 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
-use tablekit::{Batch, Column, TableError, Values};
-use tablekit_csv::{CsvOptions, CsvWriter, LineEnding, write_file, write_to};
+use tablekit::{Batch, Column, DataType, TableError, Value, Values};
+use tablekit_csv::{CsvFormat, CsvOptions, CsvWriter, Encoding, LineEnding, write_file, write_to};
 
 fn expected(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -73,12 +73,93 @@ fn default_options_write_what_pandas_writes() {
 }
 
 #[test]
-fn a_byte_order_mark_as_utf_8_sig() {
+fn utf_8_sig_starts_with_a_byte_order_mark() {
     let options = CsvOptions {
-        bom: true,
+        encoding: Encoding::Utf8Sig,
         ..CsvOptions::default()
     };
-    check(&table(), &options, "table-bom.csv");
+    check(&table(), &options, "table-utf-8-sig.csv");
+}
+
+#[test]
+fn encodings_are_named_as_python_names_them() {
+    for name in ["utf-8", "UTF-8", "utf8", "utf_8", "U8"] {
+        assert_eq!(name.parse::<Encoding>(), Ok(Encoding::Utf8), "{name}");
+    }
+    for name in ["utf-8-sig", "UTF-8-SIG", "utf_8_sig", "utf8sig"] {
+        assert_eq!(name.parse::<Encoding>(), Ok(Encoding::Utf8Sig), "{name}");
+    }
+    assert_eq!(
+        "latin-1".parse::<Encoding>(),
+        Err("tablekit writes the encodings \"utf-8\" and \"utf-8-sig\", not \"latin-1\"".into())
+    );
+    assert_eq!(Encoding::Utf8Sig.name(), "utf-8-sig");
+    assert_eq!(Encoding::default(), Encoding::Utf8);
+}
+
+#[test]
+fn rows_write_what_batches_write() {
+    let whole = table();
+    let mut format = CsvFormat::new(whole.schema(), CsvOptions::default()).unwrap();
+    let mut out = Vec::new();
+    format.start(&mut out);
+    let mut row = Vec::new();
+    for r in 0..whole.rows() {
+        row.clear();
+        row.extend(whole.columns().iter().map(|c| c.value(r)));
+        format.row(&mut out, &row).unwrap();
+    }
+    assert_eq!(out, std::fs::read(expected("table.csv")).unwrap());
+
+    let mut w = CsvWriter::new(Vec::new(), whole.schema(), CsvOptions::default()).unwrap();
+    for r in 0..whole.rows() {
+        let row: Vec<Value<'_>> = whole.columns().iter().map(|c| c.value(r)).collect();
+        w.write_row(&row).unwrap();
+    }
+    let (written, rows) = w.finish().unwrap();
+    assert_eq!(
+        (written, rows),
+        (std::fs::read(expected("table.csv")).unwrap(), 4)
+    );
+}
+
+#[test]
+fn a_row_must_fit_the_columns() {
+    let fields = vec![
+        tablekit::Field {
+            name: "n".into(),
+            data_type: DataType::U32,
+        },
+        tablekit::Field {
+            name: "t".into(),
+            data_type: DataType::Text,
+        },
+    ];
+    let mut format = CsvFormat::new(fields, CsvOptions::default()).unwrap();
+    let mut out = Vec::new();
+    let e = format.row(&mut out, &[Value::U32(1)]).unwrap_err();
+    assert!(
+        matches!(
+            e,
+            TableError::RowLength {
+                expected: 2,
+                found: 1
+            }
+        ),
+        "{e}"
+    );
+    let e = format
+        .row(&mut out, &[Value::U64(1), Value::Text("a")])
+        .unwrap_err();
+    assert!(
+        matches!(e, TableError::ValueType { ref column, expected: DataType::U32, found: DataType::U64 } if column == "n"),
+        "{e}"
+    );
+    assert!(out.is_empty(), "a refused row appends nothing");
+    format
+        .row(&mut out, &[Value::Missing, Value::Text("a, b")])
+        .unwrap();
+    assert_eq!(out, b",\"a, b\"\r\n");
 }
 
 #[test]
