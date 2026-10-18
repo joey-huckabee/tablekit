@@ -5,6 +5,18 @@ All notable changes to this repository are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). A change to what is written is
 called out under **Format**.
 
+## [0.2.0] - 2026-10-18
+
+### Added
+
+- `ParquetOptions::dictionary` (default `true`, as before): `false` writes every value
+  `PLAIN`, with no dictionary pages, for a reader that refuses the `RLE_DICTIONARY` label the
+  parquet crate gives dictionary pages even in a version 1.0 file (an old Impala).
+
+### Format
+
+- Unchanged by default. `created_by` is now `tablekit 0.2.0`.
+
 ## [0.1.0] - 2026-10-18
 
 The first release: single-threaded.
