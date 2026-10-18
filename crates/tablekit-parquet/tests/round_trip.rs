@@ -89,6 +89,7 @@ fn uncompressed_and_in_several_row_groups() {
     let whole = table();
     let options = ParquetOptions {
         compression: ParquetCompression::None,
+        ..ParquetOptions::default()
     };
     tablekit::write_atomically(&path, |out| {
         let mut w = ParquetWriter::new(out, whole.schema(), &options)?;
@@ -102,6 +103,43 @@ fn uncompressed_and_in_several_row_groups() {
     assert_eq!(reader.metadata().num_row_groups(), 2);
     assert_eq!(reader.metadata().file_metadata().num_rows(), 6);
     std::fs::remove_file(&path).unwrap();
+}
+
+/// The encodings each column chunk of the file at `path` declares.
+fn encodings(path: &Path) -> Vec<String> {
+    let reader = SerializedFileReader::new(File::open(path).unwrap()).unwrap();
+    let group = reader.metadata().row_group(0);
+    (0..group.num_columns())
+        .flat_map(|i| {
+            group
+                .column(i)
+                .encodings()
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn dictionary_encoding_can_be_turned_off() {
+    let dir = dir();
+    let (on, off) = (dir.join("dict-on.parquet"), dir.join("dict-off.parquet"));
+    write_file(&on, &table(), &ParquetOptions::default()).unwrap();
+    let options = ParquetOptions {
+        dictionary: false,
+        ..ParquetOptions::default()
+    };
+    write_file(&off, &table(), &options).unwrap();
+    assert!(encodings(&on).iter().any(|e| e.contains("DICTIONARY")));
+    let plain = encodings(&off);
+    assert!(
+        plain.iter().all(|e| e == "PLAIN" || e == "RLE"),
+        "{plain:?}"
+    );
+    // The same values either way.
+    assert_eq!(read(&on), read(&off));
+    std::fs::remove_file(&on).unwrap();
+    std::fs::remove_file(&off).unwrap();
 }
 
 #[test]

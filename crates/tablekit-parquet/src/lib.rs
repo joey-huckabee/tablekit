@@ -73,10 +73,25 @@ pub enum ParquetCompression {
 }
 
 /// The choices a user may make.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParquetOptions {
     /// How pages are compressed. Default [`ParquetCompression::Snappy`].
     pub compression: ParquetCompression,
+    /// Dictionary-encode columns where it helps. Default `true`. The file is Parquet format
+    /// version 1.0 either way, but the parquet crate labels a dictionary-encoded page
+    /// `RLE_DICTIONARY`, the name format 2.0 gave it; a reader that knows only version 1's
+    /// `PLAIN_DICTIONARY` (an old Impala) may refuse it. `false` writes every value `PLAIN`,
+    /// which every Parquet reader reads, in somewhat larger files.
+    pub dictionary: bool,
+}
+
+impl Default for ParquetOptions {
+    fn default() -> Self {
+        ParquetOptions {
+            compression: ParquetCompression::Snappy,
+            dictionary: true,
+        }
+    }
 }
 
 /// Writes a table as Parquet in one or more batches, one row group per batch.
@@ -112,6 +127,7 @@ impl<W: Write + Send> ParquetWriter<W> {
         };
         let properties = WriterProperties::builder()
             .set_compression(compression)
+            .set_dictionary_enabled(options.dictionary)
             .set_created_by(format!("tablekit {}", env!("CARGO_PKG_VERSION")))
             .build();
         let writer = SerializedFileWriter::new(out, Arc::new(root), Arc::new(properties))

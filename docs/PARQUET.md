@@ -32,13 +32,25 @@ the first always zero. `BIGINT` would turn values from 2^63 up negative.
 | Columns | In the table's order, with its names, which must be unique |
 | Nulls | Every column is `OPTIONAL`; a missing value is a null |
 | Row groups | One per batch written; one for a table written whole |
+| Format version | 1.0, with data pages of version 1 and both the logical type annotations and the legacy ones (`INT_16`, `DECIMAL`, `UTF8`) older readers use |
 | Compression | Snappy, Impala's default (option `compression`: `None`) |
-| `created_by` | `tablekit 0.1.0` |
+| Dictionary encoding | On (option `dictionary`); see below |
+| `created_by` | `tablekit` and its version |
 | Partition columns | None. Impala keeps them in directory names (`.../venue=X/...`), not in the files. |
 
 `testdata/expected/parquet/schema.txt` is the schema a table of every type gives, as the
 `parquet` crate prints it, and `crates/tablekit-parquet/tests/round_trip.rs` reads every value
 back. Files are also read with pyarrow before each release (README).
+
+## Dictionary encoding and older readers
+
+A column whose values repeat is dictionary-encoded by default, which makes files smaller. The
+parquet crate labels such a page `RLE_DICTIONARY`, the name Parquet format 2.0 gave the
+encoding, even in a version 1.0 file. Readers of the last several years, Impala on Cloudera
+CDP included, read it. A reader that knows only version 1's name, `PLAIN_DICTIONARY` (an old
+Impala, as on CDH 5), may refuse the file. If one does, set `dictionary` to `false`: every
+value is then written `PLAIN`, which every Parquet reader reads, in somewhat larger files.
+The values are the same either way.
 
 ## Column names for Impala
 
