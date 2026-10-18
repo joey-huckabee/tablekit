@@ -1,0 +1,50 @@
+# Parquet format
+
+What `tablekit-parquet` writes: a Parquet file Impala reads into the tables `cmm-gen
+generate --lang impala` makes (CMM-Code-Generator, `docs/IMPALA.md`), and any other Parquet
+reader (pyarrow, pandas, DuckDB, Spark) reads as well.
+
+## Types
+
+Impala has no unsigned integers, so each unsigned type is written as the next wider signed
+one. This is the same widening `cmm-gen`'s tables use, so a column's file type and table type
+agree.
+
+| tablekit | Parquet physical type | Parquet logical type | Impala |
+|---|---|---|---|
+| `Bool` | `BOOLEAN` | | `BOOLEAN` |
+| `I8` | `INT32` | `INTEGER(8, signed)` | `TINYINT` |
+| `I16`, `U8` | `INT32` | `INTEGER(16, signed)` | `SMALLINT` |
+| `I32`, `U16` | `INT32` | `INTEGER(32, signed)` | `INT` |
+| `I64`, `U32` | `INT64` | `INTEGER(64, signed)` | `BIGINT` |
+| `U64` | `FIXED_LEN_BYTE_ARRAY(9)` | `DECIMAL(20, 0)` | `DECIMAL(20,0)` |
+| `F32` | `FLOAT` | | `FLOAT` |
+| `F64` | `DOUBLE` | | `DOUBLE` |
+| `Text` | `BYTE_ARRAY` | `STRING` | `STRING` |
+
+A `u64` is a `DECIMAL(20,0)`, exact for every value: big-endian two's complement in 9 bytes,
+the first always zero. `BIGINT` would turn values from 2^63 up negative.
+
+## The file
+
+| | |
+|---|---|
+| Columns | In the table's order, with its names, which must be unique |
+| Nulls | Every column is `OPTIONAL`; a missing value is a null |
+| Row groups | One per batch written; one for a table written whole |
+| Compression | Snappy, Impala's default (option `compression`: `None`) |
+| `created_by` | `tablekit 0.1.0` |
+| Partition columns | None. Impala keeps them in directory names (`.../venue=X/...`), not in the files. |
+
+`testdata/expected/parquet/schema.txt` is the schema a table of every type gives, as the
+`parquet` crate prints it, and `crates/tablekit-parquet/tests/round_trip.rs` reads every value
+back. Files are also read with pyarrow before each release (README).
+
+## Column names for Impala
+
+Impala matches a file's columns to a table's by position by default
+(`PARQUET_FALLBACK_SCHEMA_RESOLUTION=position`), and by name if that is set to `name`. So a
+file meant for an Impala table should hold that table's columns, in its order, under its
+names. tablekit doesn't know any table; the tool that builds the batch chooses names and
+order. FATMOPs-Binary's `export_parquet` uses `cmm-gen`'s: `record_time`, then each field as
+a lowercase identifier.
