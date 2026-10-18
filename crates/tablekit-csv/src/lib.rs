@@ -265,8 +265,8 @@ impl CsvFormat {
     }
 
     /// Appends one value, or `na_rep` for a missing one or a NaN.
-    // HOT PATH: per value. Inlined into `row`'s loop: as a call it cost about 5% of a dump.
-    #[inline(always)]
+    // HOT PATH: per value.
+    #[inline]
     fn value(&self, out: &mut Vec<u8>, value: Value<'_>) {
         match value {
             Value::Missing => text(out, &self.options.na_rep),

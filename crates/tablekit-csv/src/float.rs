@@ -51,8 +51,11 @@ pub(crate) fn write_f32(out: &mut Vec<u8>, v: f32) {
 #[inline]
 fn write(out: &mut Vec<u8>, text: &[u8], positional: bool) {
     // zmij writes an exponent last (`e+16`, `e-7`, `e-324`), so only the tail can hold one.
+    // A loop, not `contains`: on a byte slice that calls `memchr`, about 2% of a CSV dump.
     let tail = &text[text.len().saturating_sub(5)..];
-    if positional && !tail.iter().any(|&b| b == b'e') {
+    #[allow(clippy::manual_contains)]
+    let exponent = tail.iter().any(|&b| b == b'e');
+    if positional && !exponent {
         out.extend_from_slice(text);
     } else {
         lay_out(out, text, positional);
