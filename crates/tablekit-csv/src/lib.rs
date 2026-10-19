@@ -360,24 +360,24 @@ impl<W: Write> CsvWriter<W> {
             });
         }
         let columns = batch.columns();
-        // HOT PATH: begin. One line per row, one field per value, into the reused buffer.
-        for row in 0..batch.rows() {
-            let out = &mut self.buffer;
-            out.reserve(columns.len() * 24 + 2);
-            let line_start = out.len();
-            for (i, column) in columns.iter().enumerate() {
-                if i > 0 {
-                    out.push(b',');
+        // The buffer is moved out of `self` while rows are formatted into it, and the rows are
+        // formatted by a function of their own that sees only the format, the columns and the
+        // buffer: it compiles to the same loop wherever the writer lives (a local, behind a
+        // reference, in a caller's closure), with nothing to reload through `self`.
+        let mut out = std::mem::take(&mut self.buffer);
+        let rows = batch.rows();
+        let mut row = 0;
+        while row < rows {
+            row = fill(&self.format, columns, row, rows, &mut out);
+            if out.len() >= FLUSH_AT {
+                if let Err(e) = self.out.write_all(&out) {
+                    self.buffer = out;
+                    return Err(e.into());
                 }
-                self.format.cell(out, column, row);
-            }
-            self.format.end_row(out, line_start);
-            if self.buffer.len() >= FLUSH_AT {
-                self.out.write_all(&self.buffer)?;
-                self.buffer.clear();
+                out.clear();
             }
         }
-        // HOT PATH: end.
+        self.buffer = out;
         self.rows += batch.rows() as u64;
         Ok(())
     }
@@ -408,6 +408,38 @@ impl<W: Write> CsvWriter<W> {
         self.out.flush()?;
         Ok((self.out, self.rows))
     }
+}
+
+/// Formats rows `row..rows` of `columns` into `out`, stopping after the row that takes `out`
+/// to [`FLUSH_AT`] bytes or more. Returns the next row to format.
+// HOT PATH: per row. Kept out of line so that the loop is compiled once, the same for every
+// caller, with the format and the buffer as its own arguments.
+#[inline(never)]
+fn fill(
+    format: &CsvFormat,
+    columns: &[Column],
+    mut row: usize,
+    rows: usize,
+    out: &mut Vec<u8>,
+) -> usize {
+    // HOT PATH: begin. One line per row, one field per value, into the reused buffer.
+    while row < rows {
+        out.reserve(columns.len() * 24 + 2);
+        let line_start = out.len();
+        for (i, column) in columns.iter().enumerate() {
+            if i > 0 {
+                out.push(b',');
+            }
+            format.cell(out, column, row);
+        }
+        format.end_row(out, line_start);
+        row += 1;
+        if out.len() >= FLUSH_AT {
+            break;
+        }
+    }
+    // HOT PATH: end.
+    row
 }
 
 /// Appends an integer's decimal digits, formatted on the stack by `itoa`.
