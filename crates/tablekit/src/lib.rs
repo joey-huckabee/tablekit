@@ -184,6 +184,31 @@ impl Text {
         }
     }
 
+    /// A column from text already in one buffer and where each row ends in it, without
+    /// copying: what another one-buffer text column hands over (`cmm-decode`'s
+    /// `TextValues::into_parts`). `None` unless every end is at or after the one before, within
+    /// `buffer`, and on a character boundary.
+    ///
+    /// ```
+    /// use tablekit::Text;
+    ///
+    /// let t = Text::from_parts("OnOff".to_owned(), vec![2, 2, 5]).unwrap();
+    /// assert_eq!(t.iter().collect::<Vec<_>>(), ["On", "", "Off"]);
+    /// assert_eq!(Text::from_parts("été".to_owned(), vec![1]), None);
+    /// assert_eq!(Text::from_parts("ab".to_owned(), vec![2, 1]), None);
+    /// ```
+    #[must_use]
+    pub fn from_parts(buffer: String, ends: Vec<usize>) -> Option<Self> {
+        let mut start = 0;
+        for &end in &ends {
+            if end < start || !buffer.is_char_boundary(end) {
+                return None;
+            }
+            start = end;
+        }
+        Some(Text { buffer, ends })
+    }
+
     /// Adds a row.
     // HOT PATH: per value.
     #[inline]
