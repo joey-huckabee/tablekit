@@ -5,6 +5,15 @@ All notable changes to this repository are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). A change to what is written is
 called out under **Format**.
 
+## [0.4.1] - 2026-10-18
+
+### Added
+
+- `Text::from_parts(buffer, ends)`: a text column from text already in one buffer, without
+  copying it, checked (`None` if an end goes backward, past the buffer, or into a
+  character). FATMOPs-Binary hands `cmm-decode`'s decoded text columns to its exports this
+  way.
+
 ## [0.4.0] - 2026-10-18
 
 Includes what was prepared as 0.3.2 (never released): zmij and faster rows, below.
