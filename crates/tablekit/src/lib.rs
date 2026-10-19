@@ -19,6 +19,50 @@
 //! # Ok::<(), tablekit::TableError>(())
 //! ```
 //!
+//! A tool that produces a table a batch at a time implements [`Source`]; [`copy`] drives any
+//! source into any [`BatchWriter`] (`tablekit_csv::CsvWriter`, `tablekit_parquet::ParquetWriter`),
+//! so a table of any size is written with a batch in memory at a time:
+//!
+//! ```
+//! use tablekit::{Batch, BatchWriter, Column, Field, DataType, Source, TableError, Values, copy};
+//!
+//! /// Counts to `n`, `step` rows per batch.
+//! struct Count { next: u64, n: u64, step: u64 }
+//!
+//! impl Source for Count {
+//!     type Error = TableError;
+//!     fn schema(&self) -> Vec<Field> {
+//!         vec![Field { name: "n".into(), data_type: DataType::U64 }]
+//!     }
+//!     fn next_batch(&mut self) -> Result<Option<Batch>, TableError> {
+//!         if self.next >= self.n {
+//!             return Ok(None);
+//!         }
+//!         let end = (self.next + self.step).min(self.n);
+//!         let batch = Batch::new(vec![Column::new("n", Values::U64((self.next..end).collect()))])?;
+//!         self.next = end;
+//!         Ok(Some(batch))
+//!     }
+//! }
+//!
+//! /// Sums what it is given.
+//! struct Sum(u64);
+//!
+//! impl BatchWriter for Sum {
+//!     fn write_batch(&mut self, batch: &Batch) -> Result<(), TableError> {
+//!         if let Values::U64(v) = batch.columns()[0].values() {
+//!             self.0 += v.iter().sum::<u64>();
+//!         }
+//!         Ok(())
+//!     }
+//! }
+//!
+//! let mut sum = Sum(0);
+//! let rows = copy(&mut Count { next: 0, n: 10, step: 4 }, &mut sum)?;
+//! assert_eq!((rows, sum.0), (10, 45));
+//! # Ok::<(), TableError>(())
+//! ```
+//!
 //! Files are written whole or not at all: [`write_atomically`] writes beside the target and
 //! renames into place only when the writer succeeds.
 
@@ -96,7 +140,126 @@ pub enum Values {
     /// See [`DataType::F64`].
     F64(Vec<f64>),
     /// See [`DataType::Text`].
-    Text(Vec<String>),
+    Text(Text),
+}
+
+/// A column of text: every row's text in one buffer, with where each row ends. Adding a row
+/// allocates nothing once the buffer has grown to its size, so a source can fill a column of
+/// millions of rows, or the same column batch after batch, without a string per row.
+///
+/// ```
+/// use tablekit::Text;
+///
+/// let mut t = Text::new();
+/// t.push("On");
+/// t.push_hex(&[0xab, 0x01]);
+/// assert_eq!(t.get(1), Some("ab01"));
+/// assert_eq!(t.iter().collect::<Vec<_>>(), ["On", "ab01"]);
+/// let t: Text = ["a", "b"].into_iter().collect();
+/// assert_eq!(t.len(), 2);
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Text {
+    buffer: String,
+    /// Where each row ends in `buffer`; row `i` starts where row `i - 1` ends.
+    ends: Vec<usize>,
+}
+
+/// Lowercase hex digits.
+const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+impl Text {
+    /// An empty column.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// An empty column with room for `rows` rows of `bytes` bytes in all.
+    #[must_use]
+    pub fn with_capacity(rows: usize, bytes: usize) -> Self {
+        Text {
+            buffer: String::with_capacity(bytes),
+            ends: Vec::with_capacity(rows),
+        }
+    }
+
+    /// Adds a row.
+    // HOT PATH: per value.
+    #[inline]
+    pub fn push(&mut self, s: &str) {
+        self.buffer.push_str(s);
+        self.ends.push(self.buffer.len());
+    }
+
+    /// Adds a row of `bytes` in lowercase hex, two digits a byte.
+    // HOT PATH: per value.
+    #[inline]
+    pub fn push_hex(&mut self, bytes: &[u8]) {
+        self.buffer.reserve(bytes.len() * 2);
+        for &b in bytes {
+            self.buffer
+                .push(char::from(HEX_DIGITS[usize::from(b >> 4)]));
+            self.buffer
+                .push(char::from(HEX_DIGITS[usize::from(b & 15)]));
+        }
+        self.ends.push(self.buffer.len());
+    }
+
+    /// The number of rows.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.ends.len()
+    }
+
+    /// Whether there are no rows.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.ends.is_empty()
+    }
+
+    /// Row `row`'s text.
+    // HOT PATH: per value.
+    #[must_use]
+    #[inline]
+    pub fn get(&self, row: usize) -> Option<&str> {
+        let end = *self.ends.get(row)?;
+        let start = if row == 0 { 0 } else { self.ends[row - 1] };
+        self.buffer.get(start..end)
+    }
+
+    /// Every row's text, in order.
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        (0..self.len()).filter_map(|r| self.get(r))
+    }
+
+    /// Removes every row, keeping the room they took.
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+        self.ends.clear();
+    }
+}
+
+impl<S: AsRef<str>> FromIterator<S> for Text {
+    fn from_iter<I: IntoIterator<Item = S>>(iter: I) -> Self {
+        let mut t = Text::new();
+        for s in iter {
+            t.push(s.as_ref());
+        }
+        t
+    }
+}
+
+impl From<Vec<String>> for Text {
+    fn from(v: Vec<String>) -> Self {
+        v.into_iter().collect()
+    }
+}
+
+impl From<Vec<&str>> for Text {
+    fn from(v: Vec<&str>) -> Self {
+        v.into_iter().collect()
+    }
 }
 
 impl Values {
@@ -238,7 +401,7 @@ impl Column {
             Values::U64(v) => v.get(row).map(|&x| Value::U64(x)),
             Values::F32(v) => v.get(row).map(|&x| Value::F32(x)),
             Values::F64(v) => v.get(row).map(|&x| Value::F64(x)),
-            Values::Text(v) => v.get(row).map(|x| Value::Text(x)),
+            Values::Text(v) => v.get(row).map(Value::Text),
         };
         v.unwrap_or(Value::Missing)
     }
@@ -490,24 +653,71 @@ pub fn temporary_path(path: &Path) -> PathBuf {
 /// # Errors
 ///
 /// Whatever `write` returns, or the file could not be created, flushed or renamed.
-pub fn write_atomically<T>(
+pub fn write_atomically<T, E: From<TableError>>(
     path: &Path,
-    write: impl FnOnce(&mut BufWriter<File>) -> Result<T, TableError>,
-) -> Result<T, TableError> {
+    write: impl FnOnce(&mut BufWriter<File>) -> Result<T, E>,
+) -> Result<T, E> {
     let tmp = temporary_path(path);
+    let io = |e: io::Error| E::from(TableError::Io(e));
     let result = (|| {
-        let mut out = BufWriter::with_capacity(1 << 20, File::create(&tmp)?);
+        let mut out = BufWriter::with_capacity(1 << 20, File::create(&tmp).map_err(io)?);
         let value = write(&mut out)?;
-        let file = out.into_inner().map_err(io::IntoInnerError::into_error)?;
-        file.sync_all()?;
+        let file = out
+            .into_inner()
+            .map_err(|e| io(io::IntoInnerError::into_error(e)))?;
+        file.sync_all().map_err(io)?;
         drop(file);
-        std::fs::rename(&tmp, path)?;
+        std::fs::rename(&tmp, path).map_err(io)?;
         Ok(value)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
     result
+}
+
+/// A table produced a batch at a time: by reading and decoding records, say. Every batch has
+/// the columns [`Source::schema`] names. A tool keeps its own error type (a capture that
+/// cannot be read, a user's Ctrl-C), which must take a [`TableError`] from the writer.
+pub trait Source {
+    /// What reading the source, or writing its table, can fail with.
+    type Error: From<TableError>;
+
+    /// The columns every batch has.
+    fn schema(&self) -> Vec<Field>;
+
+    /// The next batch, or `None` after the last.
+    ///
+    /// # Errors
+    ///
+    /// The source could not give it.
+    fn next_batch(&mut self) -> Result<Option<Batch>, Self::Error>;
+}
+
+/// Takes a table a batch at a time: `tablekit_csv::CsvWriter` and
+/// `tablekit_parquet::ParquetWriter`.
+pub trait BatchWriter {
+    /// Appends `batch`'s rows.
+    ///
+    /// # Errors
+    ///
+    /// Its columns differ from the table's, or writing failed.
+    fn write_batch(&mut self, batch: &Batch) -> Result<(), TableError>;
+}
+
+/// Writes every batch of `source` to `writer`, in order, and returns the rows written. One
+/// batch is in memory at a time. The caller finishes the writer.
+///
+/// # Errors
+///
+/// Whatever the source or the writer fails with.
+pub fn copy<S: Source, W: BatchWriter>(source: &mut S, writer: &mut W) -> Result<u64, S::Error> {
+    let mut rows = 0;
+    while let Some(batch) = source.next_batch()? {
+        writer.write_batch(&batch)?;
+        rows += batch.rows() as u64;
+    }
+    Ok(rows)
 }
 
 /// Rejects two columns with one name, for formats that need unique names.

@@ -10,7 +10,7 @@
 //!     Column::new("time", Values::F64(vec![0.5, 1e-5])),
 //!     Column::with_missing("Speed", Values::U16(vec![120, 0]), vec![true, false])?,
 //!     Column::new("Valid", Values::Bool(vec![true, false])),
-//!     Column::new("Note", Values::Text(vec!["a, b".into(), String::new()])),
+//!     Column::new("Note", Values::Text(vec!["a, b", ""].into())),
 //! ])?;
 //! let mut out = Vec::new();
 //! write_to(&mut out, &batch, &CsvOptions::default())?;
@@ -26,7 +26,8 @@
 //! | | Takes | For |
 //! |---|---|---|
 //! | [`write_file`], [`write_to`] | a whole [`Batch`] | most uses; a file is written whole or not at all |
-//! | [`CsvWriter`] | a table in several batches | tables too large to hold at once |
+//! | [`write_source_file`], [`write_source`] | a [`tablekit::Source`], a batch at a time | a table of any size, one batch in memory |
+//! | [`CsvWriter`] | a table in several batches (a [`tablekit::BatchWriter`]) | driving the batches yourself |
 //! | [`CsvFormat`] | a row at a time, as borrowed [`Value`]s, into the caller's buffer | a tool that writes each record as it reads it, allocating nothing per row |
 
 #![forbid(unsafe_code)]
@@ -48,7 +49,7 @@ use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
 
-use tablekit::{Batch, Field, TableError, Value, write_atomically};
+use tablekit::{Batch, BatchWriter, Field, Source, TableError, Value, copy, write_atomically};
 
 /// How each line ends.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -389,6 +390,12 @@ impl<W: Write> CsvWriter<W> {
 }
 
 /// Appends an integer's decimal digits, formatted on the stack by `itoa`.
+impl<W: Write> BatchWriter for CsvWriter<W> {
+    fn write_batch(&mut self, batch: &Batch) -> Result<(), TableError> {
+        self.write(batch)
+    }
+}
+
 // HOT PATH: per value.
 #[inline]
 fn integer(out: &mut Vec<u8>, v: impl itoa::Integer) {
@@ -443,4 +450,35 @@ pub fn write_to(out: impl Write, batch: &Batch, options: &CsvOptions) -> Result<
 /// The file could not be written.
 pub fn write_file(path: &Path, batch: &Batch, options: &CsvOptions) -> Result<u64, TableError> {
     write_atomically(path, |out| write_to(out, batch, options))
+}
+
+/// Writes every batch of `source`, header first, to `out`. Returns the rows written. One
+/// batch is in memory at a time.
+///
+/// # Errors
+///
+/// Whatever the source fails with, or the output failed.
+pub fn write_source<S: Source>(
+    out: impl Write,
+    source: &mut S,
+    options: &CsvOptions,
+) -> Result<u64, S::Error> {
+    let mut w = CsvWriter::new(out, source.schema(), options.clone())?;
+    let rows = copy(source, &mut w)?;
+    w.finish()?;
+    Ok(rows)
+}
+
+/// Writes every batch of `source` to the file at `path`, whole or not at all (see
+/// [`tablekit::write_atomically`]); an existing file is replaced. Returns the rows written.
+///
+/// # Errors
+///
+/// Whatever the source fails with, or the file could not be written.
+pub fn write_source_file<S: Source>(
+    path: &Path,
+    source: &mut S,
+    options: &CsvOptions,
+) -> Result<u64, S::Error> {
+    write_atomically(path, |out| write_source(out, source, options))
 }

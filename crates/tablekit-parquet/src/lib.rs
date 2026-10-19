@@ -55,7 +55,8 @@ use parquet::file::properties::WriterProperties;
 use parquet::file::writer::SerializedFileWriter;
 use parquet::schema::types::Type;
 use tablekit::{
-    Batch, Column, DataType, Field, TableError, Values, unique_names, write_atomically,
+    Batch, BatchWriter, Column, DataType, Field, Source, TableError, Values, copy, unique_names,
+    write_atomically,
 };
 
 /// Bytes of a `DECIMAL(20,0)`: the fewest that hold every `u64` as a signed number, a zero
@@ -179,6 +180,12 @@ impl<W: Write + Send> ParquetWriter<W> {
     }
 }
 
+impl<W: Write + Send> BatchWriter for ParquetWriter<W> {
+    fn write_batch(&mut self, batch: &Batch) -> Result<(), TableError> {
+        self.write(batch)
+    }
+}
+
 #[cold]
 fn format_error(e: parquet::errors::ParquetError) -> TableError {
     match e {
@@ -294,7 +301,7 @@ fn write_column(writer: &mut ColumnWriter<'_>, column: &Column) -> Result<(), Ta
             ByteArrayColumnWriter,
             (0..rows)
                 .filter(present)
-                .map(|r| ByteArray::from(v[r].as_bytes().to_vec()))
+                .map(|r| ByteArray::from(v.get(r).unwrap_or_default().as_bytes().to_vec()))
                 .collect()
         ),
     }
@@ -333,4 +340,36 @@ pub fn write_to(
 /// See [`write_to`]; or the file could not be written.
 pub fn write_file(path: &Path, batch: &Batch, options: &ParquetOptions) -> Result<u64, TableError> {
     write_atomically(path, |out| write_to(out, batch, options))
+}
+
+/// Writes every batch of `source` to `out`, one row group per batch. Returns the rows
+/// written. One batch is in memory at a time; a reader such as Impala works best with large
+/// row groups, so a source written as Parquet should give large batches.
+///
+/// # Errors
+///
+/// Whatever the source fails with; see [`ParquetWriter::new`] and [`ParquetWriter::write`].
+pub fn write_source<S: Source>(
+    out: impl Write + Send,
+    source: &mut S,
+    options: &ParquetOptions,
+) -> Result<u64, S::Error> {
+    let mut w = ParquetWriter::new(out, source.schema(), options)?;
+    let rows = copy(source, &mut w)?;
+    w.finish()?;
+    Ok(rows)
+}
+
+/// Writes every batch of `source` to the file at `path`, whole or not at all (see
+/// [`tablekit::write_atomically`]); an existing file is replaced. Returns the rows written.
+///
+/// # Errors
+///
+/// See [`write_source`]; or the file could not be written.
+pub fn write_source_file<S: Source>(
+    path: &Path,
+    source: &mut S,
+    options: &ParquetOptions,
+) -> Result<u64, S::Error> {
+    write_atomically(path, |out| write_source(out, source, options))
 }
