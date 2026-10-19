@@ -48,7 +48,14 @@ tablekit_parquet::write_file("out.parquet".as_ref(), &batch, &tablekit_parquet::
 
 Every call returns `Result<_, tablekit::TableError>`.
 
-For a table too large to hold at once, `CsvWriter` and `ParquetWriter` take it in batches.
+For a table too large to hold at once, implement `tablekit::Source` (a batch at a time) and
+write it with `tablekit_csv::write_source_file` or `tablekit_parquet::write_source_file`; or
+drive `CsvWriter` and `ParquetWriter` yourself. A tool that writes CSV as it reads each
+record uses `tablekit_csv::CsvFormat`, a row at a time into its own buffer.
+
+Every change that touches the writing path is measured against what it replaces, A against
+B on the same input, byte-identical output, wall time and callgrind instruction counts; a
+change that is slower is not merged. CHANGELOG.md records the figures.
 
 ## Build and test
 

@@ -32,21 +32,11 @@ fn table() -> Batch {
         ),
         Column::new(
             "note",
-            Values::Text(vec![
-                "plain".into(),
-                "a, b".into(),
-                "say \"hi\"".into(),
-                "two\nlines".into(),
-            ]),
+            Values::Text(vec!["plain", "a, b", "say \"hi\"", "two\nlines"].into()),
         ),
         Column::with_missing(
             "Mode",
-            Values::Text(vec![
-                "On".into(),
-                String::new(),
-                "Off".into(),
-                String::new(),
-            ]),
+            Values::Text(vec!["On", "", "Off", ""].into()),
             vec![true, false, true, true],
         )
         .unwrap(),
@@ -185,7 +175,7 @@ fn one_empty_field_is_written_as_two_quotes() {
     let batch = Batch::new(vec![
         Column::with_missing(
             "x",
-            Values::Text(vec!["a".into(), String::new(), String::new()]),
+            Values::Text(vec!["a", "", ""].into()),
             vec![true, true, false],
         )
         .unwrap(),
@@ -258,5 +248,68 @@ fn files_are_written_whole_or_not_at_all() {
         std::fs::read(expected("table.csv")).unwrap()
     );
     assert!(!tablekit::temporary_path(&path).exists());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Gives `table()` one row at a time.
+struct Rows {
+    whole: Batch,
+    next: usize,
+}
+
+impl tablekit::Source for Rows {
+    type Error = TableError;
+
+    fn schema(&self) -> Vec<tablekit::Field> {
+        self.whole.schema()
+    }
+
+    fn next_batch(&mut self) -> Result<Option<Batch>, TableError> {
+        if self.next == self.whole.rows() {
+            return Ok(None);
+        }
+        let r = self.next;
+        self.next += 1;
+        let columns = self
+            .whole
+            .columns()
+            .iter()
+            .map(|c| {
+                let v = c.value(r);
+                let values = match c.values() {
+                    Values::Bool(x) => Values::Bool(vec![x[r]]),
+                    Values::I8(x) => Values::I8(vec![x[r]]),
+                    Values::I16(x) => Values::I16(vec![x[r]]),
+                    Values::I64(x) => Values::I64(vec![x[r]]),
+                    Values::U64(x) => Values::U64(vec![x[r]]),
+                    Values::F32(x) => Values::F32(vec![x[r]]),
+                    Values::F64(x) => Values::F64(vec![x[r]]),
+                    Values::Text(x) => Values::Text(vec![x.get(r).unwrap_or_default()].into()),
+                    other => panic!("not in table(): {other:?}"),
+                };
+                Column::with_missing(c.name(), values, vec![v != Value::Missing]).unwrap()
+            })
+            .collect();
+        Ok(Some(Batch::new(columns)?))
+    }
+}
+
+#[test]
+fn a_source_written_batch_by_batch_is_the_whole_table() {
+    let dir = std::env::temp_dir().join(format!("tablekit-csv-source-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("rows.csv");
+    let mut rows = Rows {
+        whole: table(),
+        next: 0,
+    };
+    assert_eq!(
+        tablekit_csv::write_source_file(&path, &mut rows, &CsvOptions::default()).unwrap(),
+        4
+    );
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        std::fs::read(expected("table.csv")).unwrap()
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }

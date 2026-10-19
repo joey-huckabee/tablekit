@@ -30,7 +30,7 @@ fn main() -> Result<(), TableError> {
         Column::new("f64", Values::F64(vec![0.1, -0.0, f64::MIN_POSITIVE])),
         Column::with_missing(
             "mode",
-            Values::Text(vec!["On".into(), String::new(), "a, \"b\"".into()]),
+            Values::Text(vec!["On", "", "a, \"b\""].into()),
             some,
         )?,
     ])?;

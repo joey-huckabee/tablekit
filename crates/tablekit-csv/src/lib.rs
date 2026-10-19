@@ -10,7 +10,7 @@
 //!     Column::new("time", Values::F64(vec![0.5, 1e-5])),
 //!     Column::with_missing("Speed", Values::U16(vec![120, 0]), vec![true, false])?,
 //!     Column::new("Valid", Values::Bool(vec![true, false])),
-//!     Column::new("Note", Values::Text(vec!["a, b".into(), String::new()])),
+//!     Column::new("Note", Values::Text(vec!["a, b", ""].into())),
 //! ])?;
 //! let mut out = Vec::new();
 //! write_to(&mut out, &batch, &CsvOptions::default())?;
@@ -26,7 +26,8 @@
 //! | | Takes | For |
 //! |---|---|---|
 //! | [`write_file`], [`write_to`] | a whole [`Batch`] | most uses; a file is written whole or not at all |
-//! | [`CsvWriter`] | a table in several batches | tables too large to hold at once |
+//! | [`write_source_file`], [`write_source`] | a [`tablekit::Source`], a batch at a time | a table of any size, one batch in memory |
+//! | [`CsvWriter`] | a table in several batches (a [`tablekit::BatchWriter`]) | driving the batches yourself |
 //! | [`CsvFormat`] | a row at a time, as borrowed [`Value`]s, into the caller's buffer | a tool that writes each record as it reads it, allocating nothing per row |
 
 #![forbid(unsafe_code)]
@@ -48,7 +49,9 @@ use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
 
-use tablekit::{Batch, Field, TableError, Value, write_atomically};
+use tablekit::{
+    Batch, BatchWriter, Column, Field, Source, TableError, Value, Values, copy, write_atomically,
+};
 
 /// How each line ends.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -210,29 +213,24 @@ impl CsvFormat {
         if row.len() != self.schema.len() {
             return Err(row_length(self.schema.len(), row.len()));
         }
-        for (value, field) in row.iter().zip(&self.schema) {
+        // One pass: each value is checked as it is written, and a refused row is taken back.
+        // Room for a typical row up front, so the pushes below do not grow the buffer.
+        out.reserve(row.len() * 24 + 2);
+        let line_start = out.len();
+        for (i, (&value, field)) in row.iter().zip(&self.schema).enumerate() {
             if let Some(found) = value.data_type() {
                 if found != field.data_type {
+                    out.truncate(line_start);
                     return Err(value_type(field, found));
                 }
             }
-        }
-        self.row_unchecked(out, row.iter().copied());
-        Ok(())
-    }
-
-    /// Appends one row whose values are known to fit the columns.
-    // HOT PATH: per row.
-    #[inline]
-    fn row_unchecked<'a>(&mut self, out: &mut Vec<u8>, row: impl Iterator<Item = Value<'a>>) {
-        let line_start = out.len();
-        for (i, value) in row.enumerate() {
             if i > 0 {
                 out.push(b',');
             }
             self.value(out, value);
         }
         self.end_row(out, line_start);
+        Ok(())
     }
 
     /// Ends a row. A row of one empty field is written `""`, as Python's `csv` module (and so
@@ -245,10 +243,45 @@ impl CsvFormat {
         out.extend_from_slice(self.options.line_ending.bytes());
     }
 
+    /// Appends row `row` of `column`, formatted straight from the column's values: one
+    /// dispatch on its type, where going through [`Value`] would take two.
+    // HOT PATH: per value.
+    #[inline]
+    fn cell(&self, out: &mut Vec<u8>, column: &Column, row: usize) {
+        if column.has_missing() && !column.is_present(row) {
+            text(out, &self.options.na_rep);
+            return;
+        }
+        match column.values() {
+            Values::Bool(v) => out.extend_from_slice(if v[row] { b"True" } else { b"False" }),
+            Values::I8(v) => integer(out, v[row]),
+            Values::I16(v) => integer(out, v[row]),
+            Values::I32(v) => integer(out, v[row]),
+            Values::I64(v) => integer(out, v[row]),
+            Values::U8(v) => integer(out, v[row]),
+            Values::U16(v) => integer(out, v[row]),
+            Values::U32(v) => integer(out, v[row]),
+            Values::U64(v) => integer(out, v[row]),
+            Values::F32(v) => self.value(out, Value::F32(v[row])),
+            Values::F64(v) => self.value(out, Value::F64(v[row])),
+            Values::Text(v) => text(out, v.get(row).unwrap_or_default()),
+        }
+    }
+
+    /// Appends NaN as `na_rep`, and infinity as `inf` or `-inf`.
+    #[cold]
+    fn not_finite(&self, out: &mut Vec<u8>, nan: bool, positive: bool) {
+        if nan {
+            text(out, &self.options.na_rep);
+        } else {
+            infinity(out, positive);
+        }
+    }
+
     /// Appends one value, or `na_rep` for a missing one or a NaN.
     // HOT PATH: per value.
     #[inline]
-    fn value(&mut self, out: &mut Vec<u8>, value: Value<'_>) {
+    fn value(&self, out: &mut Vec<u8>, value: Value<'_>) {
         match value {
             Value::Missing => text(out, &self.options.na_rep),
             Value::Bool(b) => out.extend_from_slice(if b { b"True" } else { b"False" }),
@@ -260,12 +293,10 @@ impl CsvFormat {
             Value::U16(v) => integer(out, v),
             Value::U32(v) => integer(out, v),
             Value::U64(v) => integer(out, v),
-            Value::F32(x) if x.is_nan() => text(out, &self.options.na_rep),
-            Value::F64(x) if x.is_nan() => text(out, &self.options.na_rep),
-            Value::F32(x) if x.is_infinite() => infinity(out, x > 0.0),
-            Value::F64(x) if x.is_infinite() => infinity(out, x > 0.0),
-            Value::F32(x) => float::write_f32(out, x),
-            Value::F64(x) => float::write_f64(out, x),
+            Value::F32(x) if x.is_finite() => float::write_f32(out, x),
+            Value::F64(x) if x.is_finite() => float::write_f64(out, x),
+            Value::F32(x) => self.not_finite(out, x.is_nan(), x > 0.0),
+            Value::F64(x) => self.not_finite(out, x.is_nan(), x > 0.0),
             Value::Text(s) => text(out, s),
         }
     }
@@ -331,8 +362,16 @@ impl<W: Write> CsvWriter<W> {
         let columns = batch.columns();
         // HOT PATH: begin. One line per row, one field per value, into the reused buffer.
         for row in 0..batch.rows() {
-            self.format
-                .row_unchecked(&mut self.buffer, columns.iter().map(|c| c.value(row)));
+            let out = &mut self.buffer;
+            out.reserve(columns.len() * 24 + 2);
+            let line_start = out.len();
+            for (i, column) in columns.iter().enumerate() {
+                if i > 0 {
+                    out.push(b',');
+                }
+                self.format.cell(out, column, row);
+            }
+            self.format.end_row(out, line_start);
             if self.buffer.len() >= FLUSH_AT {
                 self.out.write_all(&self.buffer)?;
                 self.buffer.clear();
@@ -372,6 +411,12 @@ impl<W: Write> CsvWriter<W> {
 }
 
 /// Appends an integer's decimal digits, formatted on the stack by `itoa`.
+impl<W: Write> BatchWriter for CsvWriter<W> {
+    fn write_batch(&mut self, batch: &Batch) -> Result<(), TableError> {
+        self.write(batch)
+    }
+}
+
 // HOT PATH: per value.
 #[inline]
 fn integer(out: &mut Vec<u8>, v: impl itoa::Integer) {
@@ -426,4 +471,35 @@ pub fn write_to(out: impl Write, batch: &Batch, options: &CsvOptions) -> Result<
 /// The file could not be written.
 pub fn write_file(path: &Path, batch: &Batch, options: &CsvOptions) -> Result<u64, TableError> {
     write_atomically(path, |out| write_to(out, batch, options))
+}
+
+/// Writes every batch of `source`, header first, to `out`. Returns the rows written. One
+/// batch is in memory at a time.
+///
+/// # Errors
+///
+/// Whatever the source fails with, or the output failed.
+pub fn write_source<S: Source>(
+    out: impl Write,
+    source: &mut S,
+    options: &CsvOptions,
+) -> Result<u64, S::Error> {
+    let mut w = CsvWriter::new(out, source.schema(), options.clone())?;
+    let rows = copy(source, &mut w)?;
+    w.finish()?;
+    Ok(rows)
+}
+
+/// Writes every batch of `source` to the file at `path`, whole or not at all (see
+/// [`tablekit::write_atomically`]); an existing file is replaced. Returns the rows written.
+///
+/// # Errors
+///
+/// Whatever the source fails with, or the file could not be written.
+pub fn write_source_file<S: Source>(
+    path: &Path,
+    source: &mut S,
+    options: &CsvOptions,
+) -> Result<u64, S::Error> {
+    write_atomically(path, |out| write_source(out, source, options))
 }

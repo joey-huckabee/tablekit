@@ -192,8 +192,17 @@ wrote it.
 | When | What |
 |---|---|
 | **0.1.0, the first release** | The table model, the CSV writer (pandas' format) and the Parquet writer (Impala's types), single-threaded. FATMOPs-Binary's `export_csv.py` uses it. |
-| Next | sluice's CSV output moves onto tablekit. |
-| Then | Measure each stage on a large capture; add `tablekit-run` and its `perf/` case in FATMOPs-Binary: serial against parallel, with and without the index. |
+| 0.3 | sluice's CSV output moves onto tablekit (`CsvFormat`, a row at a time); `encoding` replaces `bom`. |
+| **0.4.0** | `Source`, `BatchWriter` and the single-threaded driver `copy`; text columns in one buffer. sluice writes Parquet through it. |
+| After the first release | `tablekit-run`, the concurrent driver, evaluated against the serial one with and without threads, thread start-up included (ROADMAP.md). |
+
+### Rows or batches
+
+A source can reach a writer as whole batches (`Source`, `copy`) or a row at a time
+(`CsvFormat`). Both write the same bytes. Which is faster depends on the tool: for sluice's
+streaming CSV dump, gathering batches first measured 5 to 20% slower than formatting each
+record as it is read, so it writes rows; Parquet needs whole columns, so it takes batches.
+Measure before choosing.
 
 ## Decisions
 

@@ -10,10 +10,11 @@
 //! more than one digit, and an exponent with a sign and at least two digits (`1e-05`,
 //! `1.2345679e+08`, `1e-300`). Checked against NumPy's output in `testdata/floats/`.
 //!
-//! The digits come from Ryū (the `ryu` crate), which finds the shortest digits with no
-//! allocation and, where two are equally short and equally close, takes the even one, as
-//! Python and NumPy do. (Rust's own `{:e}` takes the upper one there, and costs about twice as
-//! much.)
+//! The digits come from Żmij (the `zmij` crate, a port of Victor Zverovich's algorithm), which
+//! finds the shortest digits with no allocation and, where two are equally short and equally
+//! close, takes the even one, as Python and NumPy do. Rust's own `{:e}` takes the upper one
+//! there. zmij formats a double in about half the time Ryū (0.3.1) took, and a quarter of
+//! the time `{:e}` takes.
 
 /// Below this magnitude, scientific notation.
 const POSITIONAL_MIN: f64 = 1e-4;
@@ -25,34 +26,48 @@ const POSITIONAL_MAX_F32: f64 = 1e6;
 // HOT PATH: per value.
 #[inline]
 pub(crate) fn write_f64(out: &mut Vec<u8>, v: f64) {
-    let mut buffer = ryu::Buffer::new();
-    let text = buffer.format_finite(v);
-    lay_out(
-        out,
-        text.as_bytes(),
-        positional(v.abs(), POSITIONAL_MAX_F64),
-    );
+    let mut buffer = zmij::Buffer::new();
+    let text = buffer.format_finite(v).as_bytes();
+    write(out, text, positional(v.abs(), POSITIONAL_MAX_F64));
 }
 
 /// Appends finite `v` to `out`, with `f32`'s shortest digits and cutoffs.
 // HOT PATH: per value.
 #[inline]
 pub(crate) fn write_f32(out: &mut Vec<u8>, v: f32) {
-    let mut buffer = ryu::Buffer::new();
-    let text = buffer.format_finite(v);
-    lay_out(
+    let mut buffer = zmij::Buffer::new();
+    let text = buffer.format_finite(v).as_bytes();
+    write(
         out,
-        text.as_bytes(),
+        text,
         positional(f64::from(v.abs()), POSITIONAL_MAX_F32),
     );
+}
+
+/// Appends zmij's `text` in NumPy's layout. In the positional range zmij's text without an
+/// exponent is already NumPy's (`0.000921`, `123.0`, `-0.0`), so it is copied as it is: the
+/// common case for times and measurements. Anything else is laid out digit by digit.
+// HOT PATH: per value.
+#[inline]
+fn write(out: &mut Vec<u8>, text: &[u8], positional: bool) {
+    // zmij writes an exponent last (`e+16`, `e-7`, `e-324`), so only the tail can hold one.
+    // A loop, not `contains`: on a byte slice that calls `memchr`, about 2% of a CSV dump.
+    let tail = &text[text.len().saturating_sub(5)..];
+    #[allow(clippy::manual_contains)]
+    let exponent = tail.iter().any(|&b| b == b'e');
+    if positional && !exponent {
+        out.extend_from_slice(text);
+    } else {
+        lay_out(out, text, positional);
+    }
 }
 
 fn positional(abs: f64, max: f64) -> bool {
     abs == 0.0 || (POSITIONAL_MIN..max).contains(&abs)
 }
 
-/// Rewrites Ryū's text (`-1.5`, `0.0001`, `1e16`, `1.234e-7`: a sign, digits with an optional
-/// point, an optional `e` and exponent) in NumPy's layout.
+/// Rewrites zmij's text (`-1.5`, `0.0001`, `1e+16`, `1.234e-7`: a sign, digits with an
+/// optional point, an optional `e` and signed exponent) in NumPy's layout.
 // HOT PATH: per value.
 fn lay_out(out: &mut Vec<u8>, text: &[u8], positional: bool) {
     let (negative, text) = match text.split_first() {
@@ -133,6 +148,7 @@ fn lay_out(out: &mut Vec<u8>, text: &[u8], positional: bool) {
 fn parse_exponent(text: &[u8]) -> i32 {
     let (negative, digits) = match text.split_first() {
         Some((b'-', rest)) => (true, rest),
+        Some((b'+', rest)) => (false, rest),
         _ => (false, text),
     };
     let magnitude = digits

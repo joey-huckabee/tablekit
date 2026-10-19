@@ -25,7 +25,7 @@ fn table() -> Batch {
         Column::new("f64", Values::F64(vec![0.1, -0.0, f64::MIN_POSITIVE])),
         Column::with_missing(
             "mode",
-            Values::Text(vec!["On".into(), String::new(), "a, \"b\"".into()]),
+            Values::Text(vec!["On", "", "a, \"b\""].into()),
             some(3),
         )
         .unwrap(),
@@ -96,7 +96,7 @@ fn uncompressed_and_in_several_row_groups() {
         w.write(&whole)?;
         w.write(&whole)?;
         assert_eq!(w.finish()?, 6);
-        Ok(())
+        Ok::<(), TableError>(())
     })
     .unwrap();
     let reader = SerializedFileReader::new(File::open(&path).unwrap()).unwrap();
