@@ -5,6 +5,19 @@ All notable changes to this repository are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). A change to what is written is
 called out under **Format**.
 
+## [0.4.2] - 2026-10-19
+
+### Changed — the CSV batch loop compiles the same everywhere
+
+- `CsvWriter::write` formats rows in a function of its own (`fill`), kept out of line, with
+  the buffer moved out of the writer while it runs. Before, the loop was inlined into each
+  caller and compiled worse where the writer was not a local variable: FATMOPs-Binary's
+  batched export, which keeps its writer in a closure, ran 3% more instructions writing a
+  million rows than when the writer was local. Now it is the same, and the writer itself runs
+  fewer: 51.80 G against 53.31 G instructions (callgrind) for the row and batch benchmark
+  of 738,433 dump rows, 2.8% fewer. The bytes written are unchanged (every expected-file
+  test passes).
+
 ## [0.4.1] - 2026-10-18
 
 ### Added
