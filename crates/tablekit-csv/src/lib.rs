@@ -49,7 +49,9 @@ use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
 
-use tablekit::{Batch, BatchWriter, Field, Source, TableError, Value, copy, write_atomically};
+use tablekit::{
+    Batch, BatchWriter, Column, Field, Source, TableError, Value, Values, copy, write_atomically,
+};
 
 /// How each line ends.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -231,20 +233,6 @@ impl CsvFormat {
         Ok(())
     }
 
-    /// Appends one row whose values are known to fit the columns.
-    // HOT PATH: per row.
-    #[inline]
-    fn row_unchecked<'a>(&mut self, out: &mut Vec<u8>, row: impl Iterator<Item = Value<'a>>) {
-        let line_start = out.len();
-        for (i, value) in row.enumerate() {
-            if i > 0 {
-                out.push(b',');
-            }
-            self.value(out, value);
-        }
-        self.end_row(out, line_start);
-    }
-
     /// Ends a row. A row of one empty field is written `""`, as Python's `csv` module (and so
     /// pandas) writes it, so the line is not mistaken for a blank one.
     #[inline]
@@ -253,6 +241,31 @@ impl CsvFormat {
             out.extend_from_slice(b"\"\"");
         }
         out.extend_from_slice(self.options.line_ending.bytes());
+    }
+
+    /// Appends row `row` of `column`, formatted straight from the column's values: one
+    /// dispatch on its type, where going through [`Value`] would take two.
+    // HOT PATH: per value.
+    #[inline]
+    fn cell(&self, out: &mut Vec<u8>, column: &Column, row: usize) {
+        if column.has_missing() && !column.is_present(row) {
+            text(out, &self.options.na_rep);
+            return;
+        }
+        match column.values() {
+            Values::Bool(v) => out.extend_from_slice(if v[row] { b"True" } else { b"False" }),
+            Values::I8(v) => integer(out, v[row]),
+            Values::I16(v) => integer(out, v[row]),
+            Values::I32(v) => integer(out, v[row]),
+            Values::I64(v) => integer(out, v[row]),
+            Values::U8(v) => integer(out, v[row]),
+            Values::U16(v) => integer(out, v[row]),
+            Values::U32(v) => integer(out, v[row]),
+            Values::U64(v) => integer(out, v[row]),
+            Values::F32(v) => self.value(out, Value::F32(v[row])),
+            Values::F64(v) => self.value(out, Value::F64(v[row])),
+            Values::Text(v) => text(out, v.get(row).unwrap_or_default()),
+        }
     }
 
     /// Appends NaN as `na_rep`, and infinity as `inf` or `-inf`.
@@ -349,8 +362,16 @@ impl<W: Write> CsvWriter<W> {
         let columns = batch.columns();
         // HOT PATH: begin. One line per row, one field per value, into the reused buffer.
         for row in 0..batch.rows() {
-            self.format
-                .row_unchecked(&mut self.buffer, columns.iter().map(|c| c.value(row)));
+            let out = &mut self.buffer;
+            out.reserve(columns.len() * 24 + 2);
+            let line_start = out.len();
+            for (i, column) in columns.iter().enumerate() {
+                if i > 0 {
+                    out.push(b',');
+                }
+                self.format.cell(out, column, row);
+            }
+            self.format.end_row(out, line_start);
             if self.buffer.len() >= FLUSH_AT {
                 self.out.write_all(&self.buffer)?;
                 self.buffer.clear();
