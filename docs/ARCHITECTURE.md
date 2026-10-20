@@ -41,7 +41,7 @@ flowchart TB
   subgraph NEW["tablekit"]
     TK["tables, CSV and Parquet writers,<br/>later the parallel export engine"]
   end
-  ICD["FATMOPs-Binary-ICD<br/>(the format, documents only)"]
+  ICD["Data-Format-ICDs<br/>(the format, documents only)"]
   CMM["CMM-Code-Generator<br/>cmm-model · cmm-decode · cmm-codegen"]
   FB["FATMOPs-Binary<br/>reader · index · fatmops-query · Python fatmops"]
   SL["sluice<br/>convert · check · dump · summary · Python sluice"]
