@@ -4,6 +4,10 @@ How tablekit fits among the FATMOPs repositories, what is inside it, how an expo
 where concurrency will go. First written 2026-10-18 as a proposal; the decisions at the end
 were made the same day.
 
+For the current crate inventory, ASCII/Binary/sluice boundaries and improvement status,
+see [PROJECT-MAP.md](PROJECT-MAP.md). The concurrency sections below remain a design plan;
+the implemented driver is serial `tablekit::copy`.
+
 ## Contents
 
 - [Why one library](#why-one-library)
@@ -34,12 +38,13 @@ work happens in one place.
 ## Where it sits among the repositories
 
 Dependencies run one way only: tablekit knows nothing about captures or CMM XML.
-FATMOPs-Binary and sluice depend on it, and CMM-Code-Generator may, later.
+FATMOPs-Binary and sluice depend on it. CMM-Code-Generator also uses `tablekit-profile`
+and the table model for the shared SQL/Parquet type contract.
 
 ```mermaid
 flowchart TB
   subgraph NEW["tablekit"]
-    TK["tables, CSV and Parquet writers,<br/>later the parallel export engine"]
+    TK["tables, profiles, CSV and Parquet writers,<br/>later the parallel export engine"]
   end
   ICD["Data-Format-ICDs<br/>(the format, documents only)"]
   CMM["CMM-Code-Generator<br/>cmm-model · cmm-decode · cmm-codegen"]
@@ -52,7 +57,7 @@ flowchart TB
   TK -->|pinned| FB
   TK -->|pinned| SL
   TK -->|pinned| FUT
-  TK -.->|later, optional| CMM
+  TK -->|shared profile and model| CMM
 ```
 
 An arrow points from the library to the repository that uses it. A solid arrow is a git
@@ -69,9 +74,12 @@ flowchart LR
     M["tablekit<br/><i>the table model</i><br/>columns · types ·<br/>missing values · batches"]
     C["tablekit-csv<br/><i>the CSV format</i><br/>writer · CSV-FORMAT.md ·<br/>expected-file tests"]
     P["tablekit-parquet<br/><i>the Parquet format</i><br/>writer · PARQUET.md"]
+    F["tablekit-profile<br/><i>shared target contract</i><br/>types · SQL templates · TOML"]
     E["tablekit-run<br/><i>later: the engine</i><br/>workers · queue · stop flag"]
     C --> M
     P --> M
+    P --> F
+    F --> M
     E --> M
   end
 ```
@@ -81,6 +89,7 @@ flowchart LR
 | `tablekit` | Columns (names and types: bool, signed and unsigned integers, float, double, text), which rows are missing, and batches of columns. Writing a file whole or not at all. | Every tool fills the same shape, so every writer can take any tool's data. |
 | `tablekit-csv` | The CSV writer and [CSV-FORMAT.md](CSV-FORMAT.md). | The format is decided once and tested against expected files. |
 | `tablekit-parquet` | The Parquet writer and [PARQUET.md](PARQUET.md): the types Impala reads, matching the tables `cmm-gen` makes. | Loading Impala needs Parquet. The same model makes it a second writer, not a second system. |
+| `tablekit-profile` | Validated SQL/Parquet mappings, SQL comment templates and record/partition policy from TOML ([PROFILES.md](PROFILES.md)). | SQL generation and Parquet encoding consume one explicit contract. |
 | `tablekit-run` (later) | The export engine: many jobs on a pool of threads. | Concurrency is written and tested once, for every tool. |
 
 ## One export, end to end
@@ -178,9 +187,9 @@ flowchart LR
 | Tool | Before tablekit | With tablekit |
 |---|---|---|
 | FATMOPs-Binary, Python | `export_csv.py`: Rust decodes, pandas writes. | `q.export_csv(label, path)` and `q.export_parquet(label, path)`: pandas is not needed to write files; `to_pandas()` stays for analysis. |
-| sluice `dump --format csv`, `summary --format csv` | Its own CSV code. | Next: builds a table and writes it through `tablekit-csv`, with the same quoting, numbers and line endings as everything else. |
+| sluice `dump --format csv`, `summary --format csv` | Its own CSV code. | Implemented through `tablekit-csv`; dump formats rows directly, while the shared contract keeps quoting, numbers and line endings consistent. |
 | sluice, Python | `sluice.dump`, `sluice.summary` | Unchanged calls; the format comes from tablekit. |
-| Loading Impala (planned for sluice) | Not built. | `tablekit-parquet`, from the same sources: CSV and Parquet are two writers for one table. |
+| sluice load | Previously not built. | Implemented through `fatmops-query` and `tablekit-parquet`, writing partition directories and load SQL. Actual cluster application is separate. |
 | Future tools | - | Build a table; get CSV, Parquet and, later, parallelism. |
 
 The Python packages stay thin layers over Rust: each exposes its own export as a
@@ -194,6 +203,7 @@ wrote it.
 | **0.1.0, the first release** | The table model, the CSV writer (pandas' format) and the Parquet writer (Impala's types), single-threaded. FATMOPs-Binary's `export_csv.py` uses it. |
 | 0.3 | sluice's CSV output moves onto tablekit (`CsvFormat`, a row at a time); `encoding` replaces `bom`. |
 | **0.4.0** | `Source`, `BatchWriter` and the single-threaded driver `copy`; text columns in one buffer. sluice writes Parquet through it. |
+| **0.5.0** | `tablekit-profile`: SQL/Parquet type mappings and SQL comment templates shared with CMM-Code-Generator. |
 | After the first release | `tablekit-run`, the concurrent driver, evaluated against the serial one with and without threads, thread start-up included (ROADMAP.md). |
 
 ### Rows or batches

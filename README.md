@@ -1,5 +1,8 @@
 # tablekit
 
+See the [project crate and tool map](docs/PROJECT-MAP.md) for diagrams, ownership,
+overlap with the other repositories, and planned improvements with their prerequisites.
+
 SQL and Parquet type mappings now share an explicit target profile:
 [`profiles/cloudera-impala-hive-v1.toml`](profiles/cloudera-impala-hive-v1.toml).
 See [docs/PROFILES.md](docs/PROFILES.md) for loading the same profile in both generators.
@@ -13,6 +16,7 @@ Parquet file has the types Impala reads, and no tool's output drifts from anothe
 | `tablekit` | The table model: named, typed columns, missing values, batches; writing a file whole or not at all |
 | `tablekit-csv` | CSV, as pandas writes it by default ([docs/CSV-FORMAT.md](docs/CSV-FORMAT.md)) |
 | `tablekit-parquet` | Parquet, with Impala's types ([docs/PARQUET.md](docs/PARQUET.md)) |
+| `tablekit-profile` | Validated TOML shared by SQL generation and Parquet writing: types, SQL comments and schema policy ([docs/PROFILES.md](docs/PROFILES.md)) |
 
 | Document | What it covers |
 |---|---|

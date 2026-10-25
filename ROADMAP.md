@@ -7,6 +7,13 @@ behind each step.
 measured against what it replaces (A against B on the same input, byte-identical output,
 wall time and callgrind instruction counts) and is merged only if it is no slower.
 
+## Current implementation and ownership
+
+The [project map](docs/PROJECT-MAP.md) records the implementation checked on 2026-10-24,
+the crate responsible for each improvement, and its prerequisites. Older sketches below
+include completed work and future command examples; use that status ledger before starting
+an item. Plans have no delivery dates.
+
 ## Done
 
 - 0.1.0: the table model, CSV as pandas writes it, Parquet with Impala's types.
@@ -14,6 +21,9 @@ wall time and callgrind instruction counts) and is merged only if it is no slowe
   `bom`.
 - 0.4.0: text columns in one buffer; `Source`, `BatchWriter` and the serial driver `copy`;
   floats by zmij. The CSV writer is 4.9 times faster than 0.3.0's.
+- 0.5.0: `tablekit-profile`, explicit SQL/Parquet type mappings and SQL comment templates
+  in TOML, shared by CMM SQL generation and Parquet writers; cross-output agreement tests
+  live in CMM-Code-Generator 0.3.0.
 
 ## 1. Concurrent export (`tablekit-run`)
 
@@ -45,14 +55,16 @@ or bytes) before writing a group, so any source makes good files.
 ## 3. Fewer copies
 
 FATMOPs-Binary decodes a message into its own columns and then copies them into a tablekit
-batch. Decoding straight into tablekit columns (with `cmm-decode`'s planned
-column-at-a-time decoding) would remove that copy. Measure before changing.
+batch. Decoding straight into tablekit columns would remove that copy. Column-at-a-time
+decoding is already implemented in `cmm-decode`; direct buffer ownership/transfer into
+tablekit still needs measurement and design.
 
-## 4. Impala's types in one place
+## 4. Impala's types in one place: done
 
-`tablekit-parquet` and CMM-Code-Generator's Impala generator each map unsigned types to
-Impala's (`u8` to `SMALLINT`, `u64` to `DECIMAL(20,0)`). A test in CMM-Code-Generator should
-check the two agree, once it depends on tablekit.
+Implemented in tablekit 0.5.0 / CMM-Code-Generator 0.3.0. `tablekit-profile` loads the same
+explicit TOML mappings for the Parquet writer and SQL generator, including unsigned widening
+and exact uint64 decimal storage. CMM-Code-Generator tests SQL/Parquet schema agreement.
+See [docs/PROFILES.md](docs/PROFILES.md); extend that contract rather than adding a new map.
 
 ## 5. More encodings, when asked
 
