@@ -2,7 +2,7 @@
 
 Use this map to choose where a change belongs before adding a new crate or conversion path.
 Current implementation was checked against workspace manifests, binary targets and source
-on **2026-10-24**. Plans are a summary of the existing roadmaps, not a delivery schedule.
+on **2026-10-25**. Plans are a summary of the existing roadmaps, not a delivery schedule.
 **Implemented** means present in committed source; **planned** means not implemented;
 **blocked** names a prerequisite; **deferred** means deliberately not active.
 
@@ -31,18 +31,18 @@ flowchart TB
   FB --> CM
   FB --> TK
   CM -->|SQL type contract| TK
-  SL -.->|planned ASCII integration| BD
+  SL -->|ASCII to FATMOPs v1| BD
   ICD -.->|specifies| BD
   ICD -.->|specifies| FB
 ```
 
 | Repository | Owns | Current boundary |
 |---|---|---|
-| Bus-Dump-ASCII | ASCII parsing, format warnings, ASCII formatting, dump checking and the existing binary-to-ASCII tool | Does not yet provide ASCII-to-FATMOPs or decoded CSV/Parquet conversion |
+| Bus-Dump-ASCII | ASCII parsing, format warnings, ASCII formatting, dump checking and the existing binary-to-ASCII tool | Supplies reader/swap primitives to sluice ASCII-to-v1 conversion; direct decoded tables remain planned |
 | FATMOPs-Binary | Container framing and I/O, sidecar indexes, indexed queries, decoded-message exports | Implements container version 1; low-level readers/writers treat payloads as opaque |
 | CMM-Code-Generator | XML validation, message layout identity, primitive types, enums, runtime payload decoding, SQL generation | Takes labels and payload bytes; does not read captures |
 | tablekit | Typed batches, common CSV/Parquet encoders, validated SQL/Parquet target profiles | Knows no capture format or CMM XML; no standalone CLI or Python package |
-| sluice | File-oriented commands, record pipelines, record reports, table loading and partition directories | Only FATMOPs v1 input/output containers today; ASCII and EIE integration remain planned |
+| sluice | File-oriented commands, record pipelines, record reports, table loading and partition directories | FATMOPs v1 workflows plus normal ASCII-to-v1 conversion; direct ASCII decoded tables and EIE remain planned |
 | Data-Format-ICDs | Container and ASCII format requirements, plus the generator for the Word ICDs | No Rust workspace or application runtime |
 
 ## tablekit crates
