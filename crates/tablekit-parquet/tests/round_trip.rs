@@ -84,6 +84,48 @@ fn types_and_values_read_back() {
 }
 
 #[test]
+fn profile_widening_preserves_boundary_values_and_default_bytes() {
+    use tablekit_parquet::{TargetProfile, write_file_with_profile};
+    let dir = dir();
+    let default_path = dir.join("profile-default.parquet");
+    let explicit_path = dir.join("profile-explicit.parquet");
+    let wider_path = dir.join("profile-wider.parquet");
+    let batch = table();
+    let options = ParquetOptions::default();
+    write_file(&default_path, &batch, &options).unwrap();
+    write_file_with_profile(
+        &explicit_path,
+        &batch,
+        &options,
+        TargetProfile::builtin().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(&default_path).unwrap(),
+        std::fs::read(&explicit_path).unwrap()
+    );
+    let mut text = tablekit_profile::BUILTIN_TOML.to_owned();
+    for (source, sql, bits) in [
+        ("int8", "TINYINT", 8),
+        ("int16", "SMALLINT", 16),
+        ("uint8", "SMALLINT", 16),
+    ] {
+        text = text.replace(
+            &format!("[mappings.{source}]\nsql = \"{sql}\"\nphysical = \"INT32\"\nlogical = \"INTEGER({bits},signed)\""),
+            &format!("[mappings.{source}]\nsql = \"INT\"\nphysical = \"INT32\"\nlogical = \"INTEGER(32,signed)\""),
+        );
+    }
+    let profile = TargetProfile::parse(&text).unwrap();
+    write_file_with_profile(&wider_path, &batch, &options, &profile).unwrap();
+    assert_eq!(read(&default_path).1, read(&wider_path).1);
+    let (schema, _) = read(&wider_path);
+    assert!(!schema.contains("INTEGER(8,true)"));
+    for path in [default_path, explicit_path, wider_path] {
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
 fn uncompressed_and_in_several_row_groups() {
     let path = dir().join("groups.parquet");
     let whole = table();

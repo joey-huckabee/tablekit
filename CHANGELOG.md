@@ -5,6 +5,23 @@ All notable changes to this repository are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). A change to what is written is
 called out under **Format**.
 
+## [Unreleased]
+
+## [0.5.0] - 2026-10-24
+
+### Added
+
+- `tablekit-profile`: a validated TOML contract shared by SQL generation and the Parquet
+  writer. The bundled `cloudera-impala-hive-v1` profile preserves existing schemas, values
+  and comments. Missing or lossy mappings and unknown settings are refused.
+- Explicit-profile Parquet writer, batch and streaming APIs. The existing APIs use the
+  bundled profile. Profile parsing is outside the value-writing loops, which are unchanged.
+- Local A/B validation against the previous writer: 500,000 synthetic rows in six columns,
+  Snappy and dictionaries enabled, 16 measured encodes per version after warm-up. Median
+  wall time was 0.2104 s before and 0.2062 s with profiles; the 9,606,127-byte files were
+  identical. This shows no measured regression, not a claim of a speedup. Callgrind could
+  not run because WSL access was denied on the validation host.
+
 ## [0.4.2] - 2026-10-19
 
 ### Changed — the CSV batch loop compiles the same everywhere
