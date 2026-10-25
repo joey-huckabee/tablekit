@@ -94,7 +94,7 @@ or standalone tablekit executable is hidden in the test tooling.
 The [local roadmap](../ROADMAP.md) retains detailed rationale and open questions.
 For changes across layers, use the [feature placement guide](https://github.com/joey-huckabee/sluice/blob/main/docs/PROJECT-MAP.md#where-a-new-feature-belongs).
 
-## Shared storage and partition settings (Unreleased)
+## Shared storage and partition settings (released in 0.6.0)
 
 `tablekit-parquet` owns Snappy/none/Gzip/Zstandard, dictionaries, data-page bytes and encoder
 batch rows. `tablekit-profile` selects/orders the known capture partition declarations while

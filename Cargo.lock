@@ -509,11 +509,11 @@ dependencies = [
 
 [[package]]
 name = "tablekit"
-version = "0.5.0"
+version = "0.6.0"
 
 [[package]]
 name = "tablekit-csv"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "itoa",
  "tablekit",
@@ -522,7 +522,7 @@ dependencies = [
 
 [[package]]
 name = "tablekit-parquet"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "parquet",
  "tablekit",
@@ -532,7 +532,7 @@ dependencies = [
 
 [[package]]
 name = "tablekit-profile"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "tablekit",
