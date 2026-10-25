@@ -1,5 +1,9 @@
 # tablekit
 
+SQL and Parquet type mappings now share an explicit target profile:
+[`profiles/cloudera-impala-hive-v1.toml`](profiles/cloudera-impala-hive-v1.toml).
+See [docs/PROFILES.md](docs/PROFILES.md) for loading the same profile in both generators.
+
 Writes tables to CSV and Parquet in one format, for every FATMOPs tool. A tool builds a table
 from its own records; tablekit writes it. So every CSV looks like what pandas writes, every
 Parquet file has the types Impala reads, and no tool's output drifts from another's.

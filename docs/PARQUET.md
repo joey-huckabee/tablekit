@@ -1,5 +1,9 @@
 # Parquet format
 
+The explicit type mapping is supplied by `profiles/cloudera-impala-hive-v1.toml`, shared
+with the SQL generator through tablekit-profile. The bundled profile preserves the contract
+below. See [PROFILES.md](PROFILES.md) for validation, custom profiles and supported coercions.
+
 What `tablekit-parquet` writes: a Parquet file Impala reads into the tables `cmm-gen
 generate --lang impala` makes (CMM-Code-Generator, `docs/IMPALA.md`), and any other Parquet
 reader (pyarrow, pandas, DuckDB, Spark) reads as well.

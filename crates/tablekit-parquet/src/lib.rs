@@ -55,13 +55,10 @@ use parquet::file::properties::WriterProperties;
 use parquet::file::writer::SerializedFileWriter;
 use parquet::schema::types::Type;
 use tablekit::{
-    Batch, BatchWriter, Column, DataType, Field, Source, TableError, Values, copy, unique_names,
+    Batch, BatchWriter, Column, Field, Source, TableError, Values, copy, unique_names,
     write_atomically,
 };
-
-/// Bytes of a `DECIMAL(20,0)`: the fewest that hold every `u64` as a signed number, a zero
-/// byte and the `u64`'s eight.
-const U64_DECIMAL_BYTES: i32 = 9;
+pub use tablekit_profile::{BUILTIN_TOML as DEFAULT_PARQUET_PROFILE, TargetProfile};
 
 /// How the file is compressed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -110,13 +107,28 @@ impl<W: Write + Send> ParquetWriter<W> {
     /// [`TableError::NoColumns`], [`TableError::DuplicateName`] (Parquet needs unique
     /// names), or the Parquet writer refused the schema.
     pub fn new(out: W, schema: Vec<Field>, options: &ParquetOptions) -> Result<Self, TableError> {
+        let profile = TargetProfile::builtin().map_err(profile_error)?;
+        Self::new_with_profile(out, schema, options, profile)
+    }
+
+    /// Starts a file using an explicit, already validated target profile.
+    ///
+    /// # Errors
+    /// As [`Self::new`]. The profile determines the physical and logical schema before
+    /// the writer sees any values. Unsupported or lossy mappings fail at profile loading.
+    pub fn new_with_profile(
+        out: W,
+        schema: Vec<Field>,
+        options: &ParquetOptions,
+        profile: &TargetProfile,
+    ) -> Result<Self, TableError> {
         if schema.is_empty() {
             return Err(TableError::NoColumns);
         }
         unique_names(&schema)?;
         let fields = schema
             .iter()
-            .map(|f| column_type(f).map(Arc::new))
+            .map(|f| column_type(f, profile).map(Arc::new))
             .collect::<Result<Vec<_>, _>>()?;
         let root = Type::group_type_builder("schema")
             .with_fields(fields)
@@ -201,32 +213,61 @@ fn format_error(e: parquet::errors::ParquetError) -> TableError {
 
 /// The Parquet type of one column: optional, with the physical and logical types in the
 /// table above.
-fn column_type(field: &Field) -> Result<Type, TableError> {
-    let integer = |bits: i8| Some(LogicalType::integer(bits, true));
-    let (physical, logical) = match field.data_type {
-        DataType::Bool => (PhysicalType::BOOLEAN, None),
-        DataType::I8 => (PhysicalType::INT32, integer(8)),
-        DataType::I16 | DataType::U8 => (PhysicalType::INT32, integer(16)),
-        DataType::I32 | DataType::U16 => (PhysicalType::INT32, integer(32)),
-        DataType::I64 | DataType::U32 => (PhysicalType::INT64, integer(64)),
-        DataType::U64 => (
-            PhysicalType::FIXED_LEN_BYTE_ARRAY,
-            Some(LogicalType::decimal(0, 20)),
-        ),
-        DataType::F32 => (PhysicalType::FLOAT, None),
-        DataType::F64 => (PhysicalType::DOUBLE, None),
-        DataType::Text => (PhysicalType::BYTE_ARRAY, Some(LogicalType::String)),
+fn column_type(field: &Field, profile: &TargetProfile) -> Result<Type, TableError> {
+    let mapping = profile.mapping(field.data_type);
+    let physical = match mapping.physical.as_str() {
+        "BOOLEAN" => PhysicalType::BOOLEAN,
+        "INT32" => PhysicalType::INT32,
+        "INT64" => PhysicalType::INT64,
+        "FIXED_LEN_BYTE_ARRAY" => PhysicalType::FIXED_LEN_BYTE_ARRAY,
+        "FLOAT" => PhysicalType::FLOAT,
+        "DOUBLE" => PhysicalType::DOUBLE,
+        "BYTE_ARRAY" => PhysicalType::BYTE_ARRAY,
+        other => {
+            return Err(TableError::Format(format!(
+                "unsupported physical type {other}"
+            )));
+        }
+    };
+    let logical = match mapping.logical.as_str() {
+        "NONE" => None,
+        "INTEGER(8,signed)" => Some(LogicalType::integer(8, true)),
+        "INTEGER(16,signed)" => Some(LogicalType::integer(16, true)),
+        "INTEGER(32,signed)" => Some(LogicalType::integer(32, true)),
+        "INTEGER(64,signed)" => Some(LogicalType::integer(64, true)),
+        "DECIMAL" => {
+            let (Some(scale), Some(precision)) = (mapping.scale, mapping.precision) else {
+                return Err(TableError::Format(
+                    "decimal profile requires scale and precision".into(),
+                ));
+            };
+            Some(LogicalType::decimal(scale, precision))
+        }
+        "STRING" => Some(LogicalType::String),
+        other => {
+            return Err(TableError::Format(format!(
+                "unsupported logical type {other}"
+            )));
+        }
     };
     let mut builder = Type::primitive_type_builder(&field.name, physical)
         .with_repetition(Repetition::OPTIONAL)
         .with_logical_type(logical);
-    if field.data_type == DataType::U64 {
-        builder = builder
-            .with_length(U64_DECIMAL_BYTES)
-            .with_precision(20)
-            .with_scale(0);
+    if let Some(length) = mapping.length {
+        builder = builder.with_length(length);
+    }
+    if let Some(precision) = mapping.precision {
+        builder = builder.with_precision(precision);
+    }
+    if let Some(scale) = mapping.scale {
+        builder = builder.with_scale(scale);
     }
     builder.build().map_err(format_error)
+}
+
+#[cold]
+fn profile_error(error: tablekit_profile::ProfileError) -> TableError {
+    TableError::Format(error.0)
 }
 
 /// Writes one column chunk: a definition level per row (1 present, 0 missing) and the
@@ -342,6 +383,36 @@ pub fn write_file(path: &Path, batch: &Batch, options: &ParquetOptions) -> Resul
     write_atomically(path, |out| write_to(out, batch, options))
 }
 
+/// Writes a batch using the explicit target profile, without sampling any values.
+///
+/// # Errors
+/// See [`ParquetWriter::new_with_profile`] and [`ParquetWriter::write`].
+pub fn write_to_with_profile(
+    out: impl Write + Send,
+    batch: &Batch,
+    options: &ParquetOptions,
+    profile: &TargetProfile,
+) -> Result<u64, TableError> {
+    let mut writer = ParquetWriter::new_with_profile(out, batch.schema(), options, profile)?;
+    writer.write(batch)?;
+    writer.finish()
+}
+
+/// Writes a batch atomically using the explicit target profile.
+///
+/// # Errors
+/// See [`write_to_with_profile`]; or the file could not be written.
+pub fn write_file_with_profile(
+    path: &Path,
+    batch: &Batch,
+    options: &ParquetOptions,
+    profile: &TargetProfile,
+) -> Result<u64, TableError> {
+    write_atomically(path, |out| {
+        write_to_with_profile(out, batch, options, profile)
+    })
+}
+
 /// Writes every batch of `source` to `out`, one row group per batch. Returns the rows
 /// written. One batch is in memory at a time; a reader such as Impala works best with large
 /// row groups, so a source written as Parquet should give large batches.
@@ -372,4 +443,35 @@ pub fn write_source_file<S: Source>(
     options: &ParquetOptions,
 ) -> Result<u64, S::Error> {
     write_atomically(path, |out| write_source(out, source, options))
+}
+
+/// Writes a streaming source using an explicit target profile, one row group per batch.
+///
+/// # Errors
+/// A source, schema or writing error, as for [`write_source`].
+pub fn write_source_with_profile<S: Source>(
+    out: impl Write + Send,
+    source: &mut S,
+    options: &ParquetOptions,
+    profile: &TargetProfile,
+) -> Result<u64, S::Error> {
+    let mut writer = ParquetWriter::new_with_profile(out, source.schema(), options, profile)?;
+    let rows = copy(source, &mut writer)?;
+    writer.finish()?;
+    Ok(rows)
+}
+
+/// Writes a streaming source atomically using an explicit target profile.
+///
+/// # Errors
+/// See [`write_source_with_profile`]; or the file could not be written.
+pub fn write_source_file_with_profile<S: Source>(
+    path: &Path,
+    source: &mut S,
+    options: &ParquetOptions,
+    profile: &TargetProfile,
+) -> Result<u64, S::Error> {
+    write_atomically(path, |out| {
+        write_source_with_profile(out, source, options, profile)
+    })
 }

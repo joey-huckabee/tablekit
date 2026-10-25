@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 tablekit.workspace = true
+tablekit-profile.workspace = true
 parquet.workspace = true
 
 [lints]
