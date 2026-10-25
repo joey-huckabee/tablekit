@@ -147,6 +147,49 @@ fn uncompressed_and_in_several_row_groups() {
     std::fs::remove_file(&path).unwrap();
 }
 
+#[test]
+fn every_compression_preserves_schema_values_and_declares_codec() {
+    let baseline = dir().join("codec-baseline.parquet");
+    write_file(&baseline, &table(), &ParquetOptions::default()).unwrap();
+    for (name, codec) in [
+        ("none", "UNCOMPRESSED"),
+        ("snappy", "SNAPPY"),
+        ("gzip", "GZIP"),
+        ("zstd", "ZSTD"),
+    ] {
+        let path = dir().join(format!("codec-{name}.parquet"));
+        let options = ParquetOptions {
+            compression: name.parse().unwrap(),
+            dictionary: false,
+            data_page_bytes: 128,
+            write_batch_rows: 1,
+        };
+        write_file(&path, &table(), &options).unwrap();
+        assert_eq!(read(&baseline), read(&path));
+        let reader = SerializedFileReader::new(File::open(&path).unwrap()).unwrap();
+        for column in reader.metadata().row_group(0).columns() {
+            assert!(format!("{:?}", column.compression()).starts_with(codec));
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+    assert!("made-up".parse::<ParquetCompression>().is_err());
+    let original = std::fs::read(&baseline).unwrap();
+    for options in [
+        ParquetOptions {
+            data_page_bytes: 0,
+            ..ParquetOptions::default()
+        },
+        ParquetOptions {
+            write_batch_rows: 0,
+            ..ParquetOptions::default()
+        },
+    ] {
+        assert!(write_file(&baseline, &table(), &options).is_err());
+        assert_eq!(std::fs::read(&baseline).unwrap(), original);
+    }
+    std::fs::remove_file(baseline).unwrap();
+}
+
 /// The encodings each column chunk of the file at `path` declares.
 fn encodings(path: &Path) -> Vec<String> {
     let reader = SerializedFileReader::new(File::open(path).unwrap()).unwrap();

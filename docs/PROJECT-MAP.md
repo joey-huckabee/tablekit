@@ -93,3 +93,11 @@ or standalone tablekit executable is hidden in the test tooling.
 
 The [local roadmap](../ROADMAP.md) retains detailed rationale and open questions.
 For changes across layers, use the [feature placement guide](https://github.com/joey-huckabee/sluice/blob/main/docs/PROJECT-MAP.md#where-a-new-feature-belongs).
+
+## Shared storage and partition settings (Unreleased)
+
+`tablekit-parquet` owns Snappy/none/Gzip/Zstandard, dictionaries, data-page bytes and encoder
+batch rows. `tablekit-profile` selects/orders the known capture partition declarations while
+preserving types/comments. CMM emits those declarations; sluice convert/load uses matching
+directories. Sluice file conversion omits registration SQL, while warehouse load emits it.
+No format routing, capture decoding or partition directory I/O is added to tablekit.
