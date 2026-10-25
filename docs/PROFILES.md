@@ -61,8 +61,9 @@ baseline. Edits to the bundled file require rebuilding unless it is passed expli
   requiring a different value encoder must be implemented and tested before a profile may
   select it. This is capability validation, not an implicit conversion default.
 - The first version preserves flattening, enum name/code columns, padding fields, lowercase
-  identifiers, optional Parquet fields and the exporter record/partition layout. Incompatible
-  layout changes are refused; configuring them alone cannot change the exporter.
+  identifiers, optional Parquet fields and the exporter record columns. Partition fields
+  may select/reorder the known capture columns as described below; other layout changes
+  are refused.
 - Compression and dictionary encoding remain writer options, separate from type mappings.
 - Comment placeholders are validated, inserted once, and SQL-escaped by the generator.
   Field templates support `{source_path}`, `{xml_type}`, `{count}`. Header templates support

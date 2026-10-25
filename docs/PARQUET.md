@@ -42,7 +42,7 @@ the first always zero. `BIGINT` would turn values from 2^63 up negative.
 | Data page size | `data_page_bytes`: approximate uncompressed limit, default 1048576; positive |
 | Encoder batch | `write_batch_rows`: values per internal encoder batch, default 1024; positive |
 | `created_by` | `tablekit` and its version |
-| Partition columns | None. Impala keeps them in directory names (`.../venue=X/...`), not in the files. |
+| Partition columns | No extra capture columns in the file. Calling tools use the selected profile/order in directory names; see PROFILES.md. |
 
 `testdata/expected/parquet/schema.txt` is the schema a table of every type gives, as the
 `parquet` crate prints it, and `crates/tablekit-parquet/tests/round_trip.rs` reads every value
