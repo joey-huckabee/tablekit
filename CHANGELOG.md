@@ -9,6 +9,10 @@ called out under **Format**.
 
 ### Added
 
+- Ordered partition projection in the shared profile, preserving configured types/comments.
+  Profiles can select/reorder known capture fields or declare no partitions; record columns
+  and type mappings retain their existing validation.
+
 - Shared Parquet compression selection: Snappy, none, Gzip and Zstandard; strict string
   parsing and explicit positive data-page/encoder-batch controls. Dictionary selection
   remains shared. Defaults preserve the previous schema, values and writer settings.

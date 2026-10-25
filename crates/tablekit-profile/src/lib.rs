@@ -213,6 +213,33 @@ impl TargetProfile {
         &self.sql
     }
 
+    /// Projects configured partition columns into caller order, preserving their types/comments.
+    /// An empty list selects an unpartitioned table. The bundled profile keeps all six.
+    ///
+    /// # Errors
+    /// A selected name is absent from this profile or repeated.
+    pub fn select_partitions(&self, names: &[String]) -> Result<Self, ProfileError> {
+        let mut selected = self.clone();
+        selected.sql.partition_columns = names
+            .iter()
+            .map(|name| {
+                self.sql
+                    .partition_columns
+                    .iter()
+                    .find(|c| &c.name == name)
+                    .cloned()
+                    .ok_or_else(|| {
+                        ProfileError(format!(
+                            "partition {name:?} is not configured in profile {}",
+                            self.id
+                        ))
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+        selected.validate()?;
+        Ok(selected)
+    }
+
     /// Resolved mapping. Completeness is checked at construction, with no fallback mapping.
     #[must_use]
     pub fn mapping(&self, data_type: DataType) -> &TypeMapping {
@@ -273,22 +300,20 @@ impl TargetProfile {
         {
             return Err(ProfileError("this version requires path_separator = '_' and database_prefix = 'cmm_', and max_identifier in 1..=128".into()));
         }
-        // This release changes target types and comments, not the record/table layout.
-        // Reject layout changes rather than silently making SQL disagree with exporters.
+        // Record columns remain fixed. Partitions may select/reorder the known capture fields;
+        // consumers use this validated order for both directories and SQL declarations.
         let expected_records = BUILTIN_RECORD_COLUMNS.iter().map(|c| c.0);
-        let expected_partitions = BUILTIN_PARTITION_COLUMNS.iter().map(|c| c.0);
         if !self
             .sql
             .record_columns
             .iter()
             .map(|c| c.name.as_str())
             .eq(expected_records)
-            || !self
-                .sql
-                .partition_columns
-                .iter()
-                .map(|c| c.name.as_str())
-                .eq(expected_partitions)
+            || self.sql.partition_columns.iter().any(|c| {
+                !BUILTIN_PARTITION_COLUMNS
+                    .iter()
+                    .any(|known| known.0 == c.name)
+            })
             || self
                 .sql
                 .record_columns
@@ -301,7 +326,7 @@ impl TargetProfile {
                 .any(|c| c.data_type != "text")
         {
             return Err(ProfileError(
-                "record and partition layout changes are not supported by the current exporters"
+                "record layout must remain fixed; partition columns must be known capture fields of type text"
                     .into(),
             ));
         }
@@ -458,6 +483,60 @@ mod tests {
             )
             .unwrap(),
             "{xml_type}: bool"
+        );
+    }
+
+    #[test]
+    fn partitions_select_order_and_profile_comments_without_changing_types() {
+        let profile = TargetProfile::builtin().unwrap();
+        let selected = profile
+            .select_partitions(&["tail_name".into(), "venue".into()])
+            .unwrap();
+        assert_eq!(
+            selected
+                .sql
+                .partition_columns
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            ["tail_name", "venue"]
+        );
+        assert_eq!(
+            selected.sql.partition_columns[0].comment,
+            profile.sql.partition_columns[4].comment
+        );
+        assert_eq!(
+            selected.mapping(DataType::U64).sql,
+            profile.mapping(DataType::U64).sql
+        );
+        assert_eq!(
+            profile
+                .select_partitions(&[])
+                .unwrap()
+                .sql
+                .partition_columns
+                .len(),
+            0
+        );
+        assert!(
+            profile
+                .select_partitions(&["venue".into(), "venue".into()])
+                .is_err()
+        );
+        assert!(profile.select_partitions(&["unknown".into()]).is_err());
+        let start = BUILTIN_TOML.find("[[sql.partition_columns]]").unwrap();
+        let end = BUILTIN_TOML.find("[mappings.bool]").unwrap();
+        let unpartitioned = format!("{}{}", &BUILTIN_TOML[..start], &BUILTIN_TOML[end..]).replace(
+            "max_identifier = 128",
+            "max_identifier = 128\npartition_columns = []",
+        );
+        assert_eq!(
+            TargetProfile::parse(&unpartitioned)
+                .unwrap()
+                .sql
+                .partition_columns
+                .len(),
+            0
         );
     }
 }

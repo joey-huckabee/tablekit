@@ -96,3 +96,15 @@ and explicit profile selection). Invalid-profile rejection was checked with `--f
 existing output remained intact. Parquet A/B output bytes also matched the previous writer;
 timings are in CHANGELOG.md. Release validation also builds every tablekit target with
 Rust 1.85.0. Callgrind instruction counts were not collected for this change.
+
+## Partition selection and order
+
+The bundled profile retains all six capture partitions and their approved comments.
+Custom profiles may keep any ordered subset of `venue`, `sdl_name`, `mission_date`,
+`mission_desc`, `tail_name`, `test_num`: remove/reorder their `[[sql.partition_columns]]`
+entries. For no partitions, remove those entries and set `partition_columns = []` under
+`[sql]`. Types remain text and names must be known and unique. Record columns stay fixed.
+CMM SQL generation uses that order; an empty list omits PARTITIONED BY entirely.
+Sluice load defaults to the selected profile's partitions; explicit `--partitions` projects
+that list, preserving profile comments/types. File conversion defaults to none.
+Rust `TargetProfile::select_partitions` performs the same validated projection.
