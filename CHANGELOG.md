@@ -7,6 +7,8 @@ called out under **Format**.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-25
+
 ### Added
 
 - Ordered partition projection in the shared profile, preserving configured types/comments.

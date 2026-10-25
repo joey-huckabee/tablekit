@@ -71,7 +71,7 @@ See [docs/PROFILES.md](docs/PROFILES.md); extend that contract rather than addin
 `encoding` takes Python's names, so another encoding (`utf-16`, `latin-1`) can be added
 without changing the interface, when a user needs one.
 
-## 6. Shared Parquet storage controls: implemented, Unreleased
+## 6. Shared Parquet storage controls: implemented in 0.6.0
 
 Snappy/none/Gzip/Zstandard, dictionary encoding, data-page bytes and encoder-batch rows
 are owned by `tablekit-parquet`, used by sluice's convert/load routes. Type and comment
