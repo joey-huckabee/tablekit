@@ -7,6 +7,18 @@ called out under **Format**.
 
 ## [Unreleased]
 
+### Added
+
+- Shared Parquet compression selection: Snappy, none, Gzip and Zstandard; strict string
+  parsing and explicit positive data-page/encoder-batch controls. Dictionary selection
+  remains shared. Defaults preserve the previous schema, values and writer settings.
+- Codec round trips check schema, values, nulls and the declared column compression.
+
+### Changed
+
+- `ParquetOptions` adds `data_page_bytes` and `write_batch_rows`; exhaustive Rust literals
+  must include these or use the default update syntax.
+
 ## [0.5.0] - 2026-10-24
 
 ### Added

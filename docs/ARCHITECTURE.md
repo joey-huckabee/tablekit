@@ -228,3 +228,10 @@ Made with the owner on 2026-10-18.
 | Missing values | An empty cell, configurable like pandas' `na_rep` |
 | Parquet | In tablekit too, in the first release |
 | Concurrency | After the first release |
+
+## Shared Parquet writer controls
+
+Compression (Snappy/none/Gzip/Zstandard), dictionary encoding, data-page bytes and encoder
+batch rows are tablekit-parquet options, shared by sluice convert/load and binary exports.
+They do not alter profile type mappings. Partition directory selection, SQL registration,
+ASCII forms and FATMOPs versions stay in the calling tools. See [PARQUET.md](PARQUET.md).

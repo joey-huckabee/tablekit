@@ -68,6 +68,26 @@ pub enum ParquetCompression {
     Snappy,
     /// None.
     None,
+    /// Gzip with its library default compression level.
+    Gzip,
+    /// Zstandard with its library default compression level.
+    Zstd,
+}
+
+impl std::str::FromStr for ParquetCompression {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "snappy" => Ok(Self::Snappy),
+            "none" => Ok(Self::None),
+            "gzip" => Ok(Self::Gzip),
+            "zstd" => Ok(Self::Zstd),
+            _ => Err(format!(
+                "compression must be snappy, none, gzip or zstd, not {value:?}"
+            )),
+        }
+    }
 }
 
 /// The choices a user may make.
@@ -81,6 +101,10 @@ pub struct ParquetOptions {
     /// `PLAIN_DICTIONARY` (an old Impala) may refuse it. `false` writes every value `PLAIN`,
     /// which every Parquet reader reads, in somewhat larger files.
     pub dictionary: bool,
+    /// Approximate uncompressed data page size limit in bytes; positive, default 1 MiB.
+    pub data_page_bytes: usize,
+    /// Values processed per encoder batch; positive, default 1024.
+    pub write_batch_rows: usize,
 }
 
 impl Default for ParquetOptions {
@@ -88,6 +112,8 @@ impl Default for ParquetOptions {
         ParquetOptions {
             compression: ParquetCompression::Snappy,
             dictionary: true,
+            data_page_bytes: 1 << 20,
+            write_batch_rows: 1024,
         }
     }
 }
@@ -122,6 +148,11 @@ impl<W: Write + Send> ParquetWriter<W> {
         options: &ParquetOptions,
         profile: &TargetProfile,
     ) -> Result<Self, TableError> {
+        if options.data_page_bytes == 0 || options.write_batch_rows == 0 {
+            return Err(TableError::Format(
+                "Parquet page size and write batch rows must be positive".into(),
+            ));
+        }
         if schema.is_empty() {
             return Err(TableError::NoColumns);
         }
@@ -137,10 +168,14 @@ impl<W: Write + Send> ParquetWriter<W> {
         let compression = match options.compression {
             ParquetCompression::Snappy => Compression::SNAPPY,
             ParquetCompression::None => Compression::UNCOMPRESSED,
+            ParquetCompression::Gzip => Compression::GZIP(parquet::basic::GzipLevel::default()),
+            ParquetCompression::Zstd => Compression::ZSTD(parquet::basic::ZstdLevel::default()),
         };
         let properties = WriterProperties::builder()
             .set_compression(compression)
             .set_dictionary_enabled(options.dictionary)
+            .set_data_page_size_limit(options.data_page_bytes)
+            .set_write_batch_size(options.write_batch_rows)
             .set_created_by(format!("tablekit {}", env!("CARGO_PKG_VERSION")))
             .build();
         let writer = SerializedFileWriter::new(out, Arc::new(root), Arc::new(properties))

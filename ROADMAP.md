@@ -70,3 +70,11 @@ See [docs/PROFILES.md](docs/PROFILES.md); extend that contract rather than addin
 
 `encoding` takes Python's names, so another encoding (`utf-16`, `latin-1`) can be added
 without changing the interface, when a user needs one.
+
+## 6. Shared Parquet storage controls: implemented, Unreleased
+
+Snappy/none/Gzip/Zstandard, dictionary encoding, data-page bytes and encoder-batch rows
+are owned by `tablekit-parquet`, used by sluice's convert/load routes. Type and comment
+policy stays in the shared target profile. See [docs/PARQUET.md](docs/PARQUET.md).
+Codec-specific compression levels, dictionary-page sizing, target row-group gathering
+and real-cluster acceptance remain follow-up work; do not infer them from these controls.

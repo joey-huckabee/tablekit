@@ -37,8 +37,10 @@ the first always zero. `BIGINT` would turn values from 2^63 up negative.
 | Nulls | Every column is `OPTIONAL`; a missing value is a null |
 | Row groups | One per batch written; one for a table written whole |
 | Format version | 1.0, with data pages of version 1 and both the logical type annotations and the legacy ones (`INT_16`, `DECIMAL`, `UTF8`) older readers use |
-| Compression | Snappy, Impala's default (option `compression`: `None`) |
+| Compression | `Snappy` (default), `None`, `Gzip` or `Zstd`; Gzip/Zstandard use codec default levels |
 | Dictionary encoding | On (option `dictionary`); see below |
+| Data page size | `data_page_bytes`: approximate uncompressed limit, default 1048576; positive |
+| Encoder batch | `write_batch_rows`: values per internal encoder batch, default 1024; positive |
 | `created_by` | `tablekit` and its version |
 | Partition columns | None. Impala keeps them in directory names (`.../venue=X/...`), not in the files. |
 
@@ -64,3 +66,20 @@ file meant for an Impala table should hold that table's columns, in its order, u
 names. tablekit doesn't know any table; the tool that builds the batch chooses names and
 order. FATMOPs-Binary's `export_parquet` uses `cmm-gen`'s: `record_time`, then each field as
 a lowercase identifier.
+
+## Writer controls
+
+Compression, dictionary encoding, data page size and encoder batch size belong to
+`ParquetOptions`, shared by every caller. Compression names parse through
+`ParquetCompression::from_str`: `snappy`, `none`, `gzip`, `zstd`. Unknown names fail.
+Gzip uses the Rust flate2 backend; Zstandard uses the zstd codec enabled in the Parquet
+crate. Defaults retain the previous writer settings and schema/value contract.
+
+Page size is approximate: the encoder checks boundaries between internal batches, and
+an individual value can exceed the limit. Encoder batches are not row groups. Each call
+to `write_batch` still writes one row group; gathering batches to a target row-group size
+remains roadmap work. These storage settings never change the shared profile's types or
+coercions. Selecting a codec does not establish acceptance by a particular cluster version.
+
+Adding `data_page_bytes` and `write_batch_rows` extends the Rust options struct; callers
+that construct every field should add them or use `..ParquetOptions::default()`.
