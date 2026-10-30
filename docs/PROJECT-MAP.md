@@ -101,3 +101,10 @@ batch rows. `tablekit-profile` selects/orders the known capture partition declar
 preserving types/comments. CMM emits those declarations; sluice convert/load uses matching
 directories. Sluice file conversion omits registration SQL, while warehouse load emits it.
 No format routing, capture decoding or partition directory I/O is added to tablekit.
+
+### Reusable comment rendering
+
+`tablekit-profile::render_into` owns shared template parsing and appends into a caller's
+String. The SQL generator owns per-table buffer reuse; tablekit owns substitution/error
+policy. See [the API contract](PROFILES.md#rendering-into-reusable-buffers). No CSV/Parquet
+row loop, storage format or shared profile mapping changes.

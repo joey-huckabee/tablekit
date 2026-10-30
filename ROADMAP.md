@@ -78,3 +78,12 @@ are owned by `tablekit-parquet`, used by sluice's convert/load routes. Type and 
 policy stays in the shared target profile. See [docs/PARQUET.md](docs/PARQUET.md).
 Codec-specific compression levels, dictionary-page sizing, target row-group gathering
 and real-cluster acceptance remain follow-up work; do not infer them from these controls.
+
+## 7. Reusable profile rendering
+
+Implemented: append-only `tablekit_profile::render_into`, preserving the owned renderer
+and frozen substitution/error policy. CMM-Code-Generator reuses scratch capacity per
+SQL table. This adds no profile settings, schema change, telemetry or concurrency.
+Measure caller-specific timings and retained long-comment capacity alongside allocation
+savings; CMM-Code-Generator owns its SQL benchmark report. Further count formatting or
+compiled-template work requires separate evidence and exact-output tests.
