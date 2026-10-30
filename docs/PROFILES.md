@@ -109,3 +109,26 @@ CMM SQL generation uses that order; an empty list omits PARTITIONED BY entirely.
 Sluice load defaults to the selected profile's partitions; explicit `--partitions` projects
 that list, preserving profile comments/types. File conversion defaults to none.
 Rust `TargetProfile::select_partitions` performs the same validated projection.
+
+## Rendering into reusable buffers
+
+`tablekit_profile::render_into(template, values, &mut output)` appends the same
+single-pass substitutions as `render`, using capacity owned by the caller. It does not
+clear existing output. Clear a scratch string before rendering a replacement comment;
+retain it while processing one table and drop it afterward. Inserted values are literal,
+including braces, Unicode, quotes and line breaks. Duplicate supplied keys use the first
+match, exactly as before. Unknown placeholders and unmatched braces retain the existing
+errors. A failed append may leave a partial prefix; callers must discard failed output.
+The owned `render` API remains available and delegates to the same parser.
+
+The SQL generator uses this API for payload comments. This changes no TOML keys,
+mappings, validation, SQL wording or Parquet behavior. The buffer retains the largest
+comment capacity until its table finishes; cumulative allocation savings do not establish
+lower peak memory. Tests compare both entry points with an independent frozen parser,
+including malformed templates, repeated keys, literal inserted braces and large/small
+buffer reuse. Count formatting remains a separate consumer concern.
+
+This profile-only release versions `tablekit-profile` independently. The table model,
+CSV and Parquet crates retain version 0.6.0, including the Parquet writer's `created_by`
+metadata. Consumers using multiple tablekit crates should pin one repository revision
+for compatible shared Rust types. Existing consumer pins need no automatic update.

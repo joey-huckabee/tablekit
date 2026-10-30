@@ -1,7 +1,7 @@
 [package]
 name = "tablekit-profile"
 description = "Validated, explicit SQL and Parquet target profiles."
-version.workspace = true
+version = "0.6.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

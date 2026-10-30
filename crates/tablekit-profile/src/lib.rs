@@ -407,6 +407,28 @@ fn validate_template(template: &str, keys: &[&str]) -> Result<(), ProfileError> 
 /// A brace is unmatched or a placeholder has no supplied value.
 pub fn render(template: &str, values: &[(&str, &str)]) -> Result<String, ProfileError> {
     let mut out = String::with_capacity(template.len());
+    render_into(template, values, &mut out)?;
+    Ok(out)
+}
+
+/// Appends substitutions to a reusable string. Inserted values are never reparsed.
+///
+/// ```
+/// let mut out = String::from("prefix: ");
+/// tablekit_profile::render_into("{name}", &[("name", "value")], &mut out)?;
+/// assert_eq!(out, "prefix: value");
+/// # Ok::<(), tablekit_profile::ProfileError>(())
+/// ```
+///
+/// # Errors
+/// Same template errors as [`render`]. On error an appended prefix may remain in `out`;
+/// discard failed output or clear a scratch buffer before reusing it.
+pub fn render_into(
+    template: &str,
+    values: &[(&str, &str)],
+    out: &mut String,
+) -> Result<(), ProfileError> {
+    // HOT PATH: append to caller-owned capacity rather than allocate per value/comment.
     let mut rest = template;
     while let Some(start) = rest.find(['{', '}']) {
         out.push_str(&rest[..start]);
@@ -426,7 +448,7 @@ pub fn render(template: &str, values: &[(&str, &str)]) -> Result<String, Profile
         rest = &after[end + 1..];
     }
     out.push_str(rest);
-    Ok(out)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -538,5 +560,99 @@ mod tests {
                 .len(),
             0
         );
+    }
+}
+
+#[cfg(test)]
+mod reusable_render_tests {
+    use super::*;
+    fn legacy_render(template: &str, values: &[(&str, &str)]) -> Result<String, ProfileError> {
+        let mut out = String::with_capacity(template.len());
+        let mut rest = template;
+        while let Some(start) = rest.find(['{', '}']) {
+            out.push_str(&rest[..start]);
+            if rest.as_bytes()[start] == b'}' {
+                return Err(ProfileError("unmatched closing brace in template".into()));
+            }
+            let after = &rest[start + 1..];
+            let end = after
+                .find('}')
+                .ok_or_else(|| ProfileError("unclosed template placeholder".into()))?;
+            let key = &after[..end];
+            let value = values
+                .iter()
+                .find(|(name, _)| *name == key)
+                .ok_or_else(|| ProfileError(format!("unknown template placeholder {{{key}}}")))?;
+            out.push_str(value.1);
+            rest = &after[end + 1..];
+        }
+        out.push_str(rest);
+        Ok(out)
+    }
+    // Frozen 0.6.0 parser above is independent of render_into.
+    #[test]
+    fn reusable_renderer_matches_frozen_values_errors_and_reuse() {
+        let cases = [
+            "",
+            "plain é😀",
+            "{x}",
+            "{x}{x}",
+            "{}",
+            "{é}",
+            "{x{y}",
+            "{bad}{x}",
+            "pre{x}{bad}",
+            "}",
+            "{",
+            "{x",
+            "{x}}",
+            "{{x}",
+            "\r\n'{x}\\{y}",
+        ];
+        let values = [
+            ("x", "é'\\\r\n{not_reparsed}"),
+            ("x", "ignored duplicate"),
+            ("y", ""),
+            ("", "empty key"),
+            ("é", "Unicode key"),
+            ("x{y", "brace in key"),
+        ];
+        let mut scratch = String::new();
+        for template in cases {
+            let expected = legacy_render(template, &values);
+            let actual = render(template, &values);
+            assert_eq!(
+                actual.as_ref().map_err(ToString::to_string),
+                expected.as_ref().map_err(ToString::to_string)
+            );
+            scratch.clear();
+            let result = render_into(template, &values, &mut scratch);
+            match expected {
+                Ok(text) => {
+                    assert!(result.is_ok());
+                    assert_eq!(scratch, text);
+                }
+                Err(error) => assert_eq!(result.unwrap_err().to_string(), error.to_string()),
+            }
+        }
+        scratch.clear();
+        scratch.push_str("existing:");
+        render_into("{x}", &values, &mut scratch).unwrap();
+        assert_eq!(scratch, format!("existing:{}", values[0].1));
+        scratch.clear();
+        scratch.push_str("existing:");
+        assert!(render_into("pre{x}{bad}", &values, &mut scratch).is_err());
+        assert_eq!(scratch, format!("existing:pre{}", values[0].1));
+    }
+    #[test]
+    fn large_then_short_and_empty_values_do_not_leave_stale_text() {
+        let mut out = String::new();
+        for value in ["é😀'\\\r\n{x}".repeat(8192), "tiny".into(), String::new()] {
+            for template in ["{x}", "literal", "{x}{x}", ""] {
+                out.clear();
+                render_into(template, &[("x", &value)], &mut out).unwrap();
+                assert_eq!(out, legacy_render(template, &[("x", &value)]).unwrap());
+            }
+        }
     }
 }

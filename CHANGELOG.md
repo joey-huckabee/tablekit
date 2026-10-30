@@ -7,6 +7,24 @@ called out under **Format**.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-29
+
+### Added
+
+- `tablekit-profile::render_into`: append template substitutions into caller-owned capacity.
+  Existing `render`, substitution rules, first-key selection and error text are preserved.
+  Frozen-parser regression tests cover errors, Unicode, inserted literal braces and reuse.
+- CMM-Code-Generator's synthetic wide SQL prototype removes 130944 generation allocation
+  events and 3274880 cumulative requested bytes versus its owned-comment implementation.
+  Caller measurements and peak-memory limits belong in its SQL comment-buffer report.
+
+### Release scope
+
+- Only `tablekit-profile` advances to 0.6.1. Model/CSV/Parquet remain at 0.6.0 to preserve
+  existing writer version metadata. No mappings, profile files, CSV/Parquet bytes or
+  external dependencies change. Appending can leave partial output on a template error;
+  callers must discard that output. Scratch capacity persists until the caller drops it.
+
 ## [0.6.0] - 2026-10-25
 
 ### Added
