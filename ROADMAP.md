@@ -9,8 +9,8 @@ wall time and callgrind instruction counts) and is merged only if it is no slowe
 
 ## Current implementation and ownership
 
-The [project map](docs/PROJECT-MAP.md) records the implementation checked on 2026-10-24,
-the crate responsible for each improvement, and its prerequisites. Older sketches below
+The [project map](docs/PROJECT-MAP.md) records crate ownership, prerequisites and the
+2026-10-30 reconciliation of workflow and release status. Older sketches below
 include completed work and future command examples; use that status ledger before starting
 an item. Plans have no delivery dates.
 
