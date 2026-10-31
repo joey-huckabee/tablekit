@@ -1,9 +1,11 @@
 # Project crate and tool map
 
 Use this map to choose where a change belongs before adding a new crate or conversion path.
-Current implementation was checked against workspace manifests, binary targets and source
-on **2026-10-25**. Plans are a summary of the existing roadmaps, not a delivery schedule.
-**Implemented** means present in committed source; **planned** means not implemented;
+The original crate inventory was checked on **2026-10-25**. Conversion, record-time and
+release status were reconciled with committed source and tags on **2026-10-30**. Plans
+are a summary of the existing roadmaps, not a delivery schedule.
+**Implemented** means present in committed source, not necessarily a published release;
+**planned** means not implemented;
 **blocked** names a prerequisite; **deferred** means deliberately not active.
 
 This page focuses on **tablekit**. The [complete project map](https://github.com/joey-huckabee/sluice/blob/main/docs/PROJECT-MAP.md)
@@ -38,11 +40,11 @@ flowchart TB
 
 | Repository | Owns | Current boundary |
 |---|---|---|
-| Bus-Dump-ASCII | ASCII parsing, format warnings, ASCII formatting, dump checking and the existing binary-to-ASCII tool | Supplies reader/swap primitives to sluice ASCII-to-v1 conversion; direct decoded tables remain planned |
+| Bus-Dump-ASCII | ASCII parsing, format warnings, ASCII formatting, dump checking and the existing binary-to-ASCII tool | Supplies reader/swap primitives to sluice ASCII-to-v1 and direct Parquet routes; decoded CSV remains planned |
 | FATMOPs-Binary | Container framing and I/O, sidecar indexes, indexed queries, decoded-message exports | Implements container version 1; low-level readers/writers treat payloads as opaque |
-| CMM-Code-Generator | XML validation, message layout identity, primitive types, enums, runtime payload decoding, SQL generation | Takes labels and payload bytes; does not read captures |
+| CMM-Code-Generator | XML validation, message layouts/types/enums, runtime decoding, SQL/Rust generation and XML workload profiling | Takes labels and payload bytes; does not read captures |
 | tablekit | Typed batches, common CSV/Parquet encoders, validated SQL/Parquet target profiles | Knows no capture format or CMM XML; no standalone CLI or Python package |
-| sluice | File-oriented commands, record pipelines, record reports, table loading and partition directories | FATMOPs v1 workflows plus normal ASCII-to-v1 conversion; direct ASCII decoded tables and EIE remain planned |
+| sluice | File-oriented commands, record pipelines, record reports, table loading and partition directories | FATMOPs v1, ASCII-to-v1 and direct ASCII-to-Parquet routes are implemented; decoded CSV and EIE remain planned |
 | Data-Format-ICDs | Container and ASCII format requirements, plus the generator for the Word ICDs | No Rust workspace or application runtime |
 
 ## tablekit crates

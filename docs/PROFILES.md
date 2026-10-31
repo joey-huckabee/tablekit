@@ -8,8 +8,16 @@ No XML additions are needed to reproduce the existing SQL comments.
 
 The profile preserves the existing Impala SQL and Parquet schemas. Its name identifies a
 baseline, not a certification of a particular cluster release. Validate it on the intended
-Impala and Hive versions before deployment. Datetime interpretation remains deferred:
-`SystemTime_T` resolves to `uint64`, which is stored exactly as `DECIMAL(20,0)`.
+Impala and Hive versions before deployment. Source clock interpretation belongs to the caller. Sluice direct ASCII on main resolves
+UTC calendar values; payload `SystemTime_T` remains raw `uint64`, stored exactly as
+`DECIMAL(20,0)`, pending its separate engineering-source audit.
+
+The profile includes a legacy record_columns list. CMM SQL since 0.5.0 uses its packaged
+application layout for record_time_seconds, record_time_utc and record_time_mode, checked
+against this profile's primitive mappings. The shared caller-resolved UTC adapter consumes
+that same CMM contract. Existing binary exporters keep legacy record_time; selecting a
+profile alone does not migrate their schema or establish UTC. See [the dataflow/status
+contract](https://github.com/joey-huckabee/sluice/blob/main/docs/RECORD-TIME-PARQUET.md).
 
 ## Loading
 

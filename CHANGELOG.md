@@ -7,6 +7,13 @@ called out under **Format**.
 
 ## [Unreleased]
 
+### Documentation
+
+- Reconcile project maps and workflow status with implemented direct ASCII Parquet,
+  canonical convert/load routes, source-versus-release boundaries and deferred binary UTC.
+  Documentation only; no runtime, dependency, schema or specification change.
+
+
 ## [0.6.1] - 2026-10-29
 
 ### Added
