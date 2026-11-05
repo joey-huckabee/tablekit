@@ -32,3 +32,42 @@ table.to_csv("table-lf.csv", index=False, lineterminator="\n")
 
 # One column: an empty or missing value is written "" so the line is not blank.
 pd.DataFrame({"x": ["a", "", None]}).to_csv("one-column.csv", index=False, lineterminator="\r\n")
+
+# Cell formats (CsvOptions.cell_formats): pandas writes the columns after Python's own
+# formatting has turned them into text -- format(v, "04X"), f"{v:.6f}" -- which is the
+# referee for CellFormat::HexUpper, HexLower and Fixed. None stays missing (written empty).
+# NaN is missing too, and infinity is written as for the default format.
+def cells(values, spec):
+    return [None if v is None else format(v, spec) for v in values]
+
+
+def fixed(values, decimals):
+    out = []
+    for v in values:
+        if v is None or v != v:
+            out.append(None)
+        elif v in (float("inf"), float("-inf")):
+            out.append("inf" if v > 0 else "-inf")
+        else:
+            out.append(f"{v:.{decimals}f}")
+    return out
+
+
+level = [float(np.float32(v)) for v in (0.1, 1e-4, 3.4e38, -2.5, 0.0, 1.5, 7.0, 1e-3, 2.0, 0.5)]
+pd.DataFrame(
+    {
+        "word": cells([0x0400, 0, 0xFFFF, 0x2F, None, 1, 0xABCD, 0x10, 0x8000, 0x7FFF], "04X"),
+        "byte": cells([255, 0, 10, 1, 128, None, 15, 16, 254, 3], "02X"),
+        "addr": cells([0xDEADBEEF, 1, 0, 0xABC, 0xFFFFFFFF, 0x10000, 7, None, 0x80000000, 2], "08X"),
+        "big": cells(
+            [2**64 - 1, 0, 0x1234, 1 << 40, 0xFFFF, 0x10000, None, 5, 0xABCDEF, 1], "04x"
+        ),
+        "delta": fixed(
+            [0.0, 1.5e-05, 123.456789, -0.0, 1.0000005, 5e-07, -1e-09, 1e20, float("nan"),
+             float("inf")],
+            6,
+        ),
+        "level": fixed(level, 3),
+        "n": np.array([1, -2, 3, -4, 5, -6, 7, -8, 9, -10], dtype=np.int32),
+    }
+).to_csv("table-formats.csv", index=False, lineterminator="\r\n")

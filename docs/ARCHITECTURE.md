@@ -214,6 +214,14 @@ streaming CSV dump, gathering batches first measured 5 to 20% slower than format
 record as it is read, so it writes rows; Parquet needs whole columns, so it takes batches.
 Measure before choosing.
 
+A tool whose columns are fixed in its code can write a row a cell at a time (`RowWriter`),
+one method per column named for its type and format. Nothing is looked up or dispatched per
+cell, and each cell is followed by its separator rather than preceded by one, so the code is
+what a hand-written writer for those columns would be: for aero1553's 46-column 1553
+records it ran at 0.97 of the time of that tool's own writer, bytes identical. Whether each
+method suits its column is checked in debug builds; the cell count, and quoting wherever text
+needs it, in every build. `CsvFormat::row` remains the fully checked general way in.
+
 ## Decisions
 
 Made with the owner on 2026-10-18.

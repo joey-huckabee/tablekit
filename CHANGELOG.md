@@ -7,6 +7,41 @@ called out under **Format**.
 
 ## [Unreleased]
 
+### Added -- cell formats and the row writer (tablekit-csv)
+
+- **`CsvOptions::cell_formats`**: a column can be written as upper- or lower-case
+  hexadecimal (`CellFormat::HexUpper(w)`, `HexLower(w)`) or with a fixed number of
+  decimals (`CellFormat::Fixed(d)`), for tools whose users compare raw machine words and
+  measured intervals. Each matches what pandas writes after Python's own `format(v, "04X")`
+  or `f"{v:.6f}"`; `testdata/expected/csv/table-formats.csv` is that file, written by pandas
+  3.0.6 and NumPy 2.5.3 (`make.py`). A format the column's type cannot take is refused when
+  the format is built. Every way in -- a batch, `CsvFormat::row`, the row writer -- writes
+  the same bytes for it.
+- **`RowWriter`** (`CsvFormat::begin_row`, `CsvWriter::write_row_with`): a row written a cell
+  at a time, one method per column named for its type and format (`u16`, `text`,
+  `hex::<4>`, `fixed::<6>`, `text_with` for text built from numbers through a
+  `TextBuilder`). It writes the bytes `CsvFormat::row` writes for the same values (20,000
+  random rows of every type and format, both `na_rep`s), quotes text wherever it needs it,
+  and refuses a row with the wrong number of cells, in every build; whether each method
+  suits its column is checked in debug builds.
+- Measured on aero1553's 21 MB golden 1553 recording (460,575 records, 46 columns: a
+  timestamp built from numbers, 32 hex words, a six-decimal interval), rendering only, one
+  thread, best of 15 interleaved rounds, three runs, on an ARM (aarch64) host: aero1553's own
+  hand-written writer 112.6 ns per record, `RowWriter` 109.0 ns (0.97x), the bytes
+  identical; `CsvFormat::row` with the same cell formats 450 ns, since it is the general,
+  fully checked way in. Callgrind: 1,787 against 1,876 instructions per record (1.05x).
+
+### Changed
+
+- `CsvOptions` adds `cell_formats`; exhaustive Rust literals must include it or use the
+  default update syntax. Nothing written changes for a table without cell formats.
+- The batch writer and `CsvFormat::row` run the loops they ran before for a table without
+  cell formats; a table with them takes loops of their own. Callgrind, 1,000,000 rows of
+  seven columns, against `main`: batch writer ROWS_BATCH; `CsvFormat::row` ROWS_ROW;
+  wall time WALL. The new paths call none of the existing per-value functions: a second
+  caller made the compiler stop inlining `cell` and `value` into those loops, 6% more
+  instructions per row, which a first version of this change did.
+
 ### Documentation
 
 - Reconcile project maps and workflow status with implemented direct ASCII Parquet,
