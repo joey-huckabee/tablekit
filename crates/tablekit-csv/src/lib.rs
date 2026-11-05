@@ -220,21 +220,7 @@ impl CsvFormat {
         if schema.is_empty() {
             return Err(TableError::NoColumns);
         }
-        let mut formats = vec![CellFormat::Default; schema.len()];
-        for (name, format) in &options.cell_formats {
-            let Some(i) = schema.iter().position(|f| &f.name == name) else {
-                return Err(TableError::Format(format!(
-                    "cell format for {name:?}: no such column"
-                )));
-            };
-            if formats[i] != CellFormat::Default {
-                return Err(TableError::Format(format!(
-                    "cell format for {name:?} given twice"
-                )));
-            }
-            check_cell_format(&schema[i], *format)?;
-            formats[i] = *format;
-        }
+        let formats = resolve_cell_formats(&schema, &options.cell_formats)?;
         let formatted = formats.iter().any(|&f| f != CellFormat::Default);
         let na_empty = options.na_rep.is_empty();
         Ok(CsvFormat {
@@ -303,7 +289,9 @@ impl CsvFormat {
 
     /// [`CsvFormat::row`] for a table with [`CellFormat`]s. Its own function, so a table
     /// without them compiles and runs exactly the loop it did before formats existed.
-    // HOT PATH: per row.
+    // HOT PATH: per row, for a table with cell formats. Cold so that a table without them
+    // keeps the code layout `row` had before formats existed (measured: callgrind).
+    #[cold]
     #[inline(never)]
     fn row_formatted(&self, out: &mut Vec<u8>, row: &[Value<'_>]) -> Result<(), TableError> {
         out.reserve(row.len() * 24 + 2);
@@ -388,7 +376,7 @@ impl CsvFormat {
             return;
         }
         match column.values() {
-            Values::Bool(v) => out.extend_from_slice(if v[row] { b"True" } else { b"False" }),
+            Values::Bool(v) => write_bool(out, v[row]),
             Values::I8(v) => integer(out, v[row]),
             Values::I16(v) => integer(out, v[row]),
             Values::I32(v) => integer(out, v[row]),
@@ -442,7 +430,7 @@ impl CsvFormat {
     fn value(&self, out: &mut Vec<u8>, value: Value<'_>) {
         match value {
             Value::Missing => text(out, &self.options.na_rep),
-            Value::Bool(b) => out.extend_from_slice(if b { b"True" } else { b"False" }),
+            Value::Bool(b) => write_bool(out, b),
             Value::I8(v) => integer(out, v),
             Value::I16(v) => integer(out, v),
             Value::I32(v) => integer(out, v),
@@ -488,7 +476,7 @@ impl CsvFormat {
     fn default_value(&self, out: &mut Vec<u8>, value: Value<'_>) {
         match value {
             Value::Missing => text(out, &self.options.na_rep),
-            Value::Bool(b) => out.extend_from_slice(if b { b"True" } else { b"False" }),
+            Value::Bool(b) => write_bool(out, b),
             Value::I8(v) => integer(out, v),
             Value::I16(v) => integer(out, v),
             Value::I32(v) => integer(out, v),
@@ -515,6 +503,32 @@ impl CsvFormat {
             self.not_finite(out, x.is_nan(), x > 0.0);
         }
     }
+}
+
+/// Each column's [`CellFormat`], in column order, from [`CsvOptions::cell_formats`]. Out of
+/// line, so that [`CsvFormat::new`] stays small enough to inline where a caller builds a
+/// format beside the loop that uses it (callgrind: a larger `new` changed that loop).
+#[inline(never)]
+fn resolve_cell_formats(
+    schema: &[Field],
+    cell_formats: &[(String, CellFormat)],
+) -> Result<Vec<CellFormat>, TableError> {
+    let mut formats = vec![CellFormat::Default; schema.len()];
+    for (name, format) in cell_formats {
+        let Some(i) = schema.iter().position(|f| &f.name == name) else {
+            return Err(TableError::Format(format!(
+                "cell format for {name:?}: no such column"
+            )));
+        };
+        if formats[i] != CellFormat::Default {
+            return Err(TableError::Format(format!(
+                "cell format for {name:?} given twice"
+            )));
+        }
+        check_cell_format(&schema[i], *format)?;
+        formats[i] = *format;
+    }
+    Ok(formats)
 }
 
 /// Refuses a [`CellFormat`] the column's type cannot take.
@@ -661,8 +675,7 @@ impl RowWriter<'_, '_> {
     #[inline]
     pub fn bool(&mut self, v: bool) {
         self.begin_cell(Some((tablekit::DataType::Bool, CellFormat::Default)));
-        self.out
-            .extend_from_slice(if v { b"True" } else { b"False" });
+        write_bool(self.out, v);
         self.end_cell();
     }
 
@@ -1045,6 +1058,19 @@ fn wide_digits(out: &mut Vec<u8>, n: u64, width: usize) {
     for slot in out[start..].iter_mut().rev() {
         *slot = b'0' + u8::try_from(rest % 10).unwrap_or(0);
         rest /= 10;
+    }
+}
+
+/// `True` or `False`. Four bytes are always copied (`True` or `Fals`) and the `e` of `False`
+/// is pushed after: two fixed-size stores. Written as one copy of 4 or 5 bytes, the compiler
+/// may merge the two into a single copy of variable length, a `memcpy` call per value, which
+/// it did in `CsvFormat::row` once this crate had more callers (callgrind, 0.7.0).
+// HOT PATH: per value.
+#[inline]
+fn write_bool(out: &mut Vec<u8>, b: bool) {
+    out.extend_from_slice(if b { b"True" } else { b"Fals" });
+    if !b {
+        out.push(b'e');
     }
 }
 

@@ -35,12 +35,18 @@ called out under **Format**.
 
 - `CsvOptions` adds `cell_formats`; exhaustive Rust literals must include it or use the
   default update syntax. Nothing written changes for a table without cell formats.
-- The batch writer and `CsvFormat::row` run the loops they ran before for a table without
-  cell formats; a table with them takes loops of their own. Callgrind, 1,000,000 rows of
-  seven columns, against `main`: batch writer ROWS_BATCH; `CsvFormat::row` ROWS_ROW;
-  wall time WALL. The new paths call none of the existing per-value functions: a second
-  caller made the compiler stop inlining `cell` and `value` into those loops, 6% more
-  instructions per row, which a first version of this change did.
+- `True` and `False` are written with two fixed-size stores (`True`/`Fals`, then `e`), so
+  the compiler cannot merge them into a variable-length copy -- a `memcpy` call per value,
+  which it made of the old form in `CsvFormat::row` once this crate had more code. On its
+  own, against `main`, that is 1.9% fewer instructions for the batch writer and 1.3% fewer
+  for `CsvFormat::row` (callgrind, 20,000 rows of seven columns, one of them `Bool`).
+- **Open before merging:** for a table without cell formats, the batch writer matches that
+  baseline (+551 instructions in all), but `CsvFormat::row` runs 3.5% more instructions
+  per row (34,170,933 against 33,015,029). `row` itself is unchanged apart from one check,
+  which measures at nothing; removing it, keeping `CsvFormat::new` inlinable and moving the
+  formatted paths out of line did not change the figure. The two compiled loops differ in
+  layout throughout. To be measured on x86 before deciding; the README's rule is that a
+  slower change is not merged.
 
 ### Documentation
 
