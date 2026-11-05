@@ -7,6 +7,26 @@ called out under **Format**.
 
 ## [Unreleased]
 
+### Security
+
+- Update only the locked Zstandard wrappers: zstd 0.13.3 to 0.13.4 and zstd-safe 7.3.0
+  to 7.4.0, resolving RUSTSEC-2026-0391 and RUSTSEC-2026-0395 through RUSTSEC-2026-0406
+  without exceptions. Parquet remains 59.3.0, zstd-sys remains 2.1.2+zstd.1.5.7, and
+  Rust 1.85 remains supported. No new dependency or manifest constraint is added.
+- CSV and all eight codec/dictionary Parquet variants are byte-identical in a 131,072-row
+  synthetic before/after comparison; golden files remain unchanged. Sixteen measured Zstd
+  writes after warm-up gave median 39.750/39.532 ms before/after without dictionaries and
+  37.740/37.740 ms with dictionaries. See [comparison scope and limits](docs/CI.md#zstandard-output-compatibility).
+- Consumers must update their own lockfiles: tablekit's lockfile is not used when resolving
+  it as a Git/path dependency. See [the audited consumer snapshots and update steps](docs/CI.md#zstandard-security-update-and-consumer-lockfiles).
+
+### Added
+
+- GitHub Actions checks stable Linux/Windows and Rust 1.85 Linux, including formatting,
+  warning-free Clippy/docs and locked tests/doctests. A separate scheduled dependency audit
+  checks RustSec advisories and source provenance. The owner-approved CI policy replaces
+  the earlier no-CI rule; action SHAs, permissions and scope are documented in docs/CI.md.
+
 ### Documentation
 
 - Reconcile project maps and workflow status with implemented direct ASCII Parquet,
