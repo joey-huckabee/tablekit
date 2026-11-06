@@ -623,13 +623,17 @@ pub struct RowWriter<'f, 'o> {
     mismatch: Option<(usize, tablekit::DataType)>,
 }
 
+#[expect(
+    clippy::inline_always,
+    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+)]
 impl RowWriter<'_, '_> {
     /// Counts a cell; in debug builds, checks the method that writes it (`ty`, `format`)
     /// suits the column. `None` suits any column. Each cell is followed by a separator
     /// ([`RowWriter::end_cell`]), and [`RowWriter::finish`] turns the last one into the line
     /// ending: no cell has to ask whether it is the first.
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     fn begin_cell(&mut self, expect: Option<(tablekit::DataType, CellFormat)>) {
         if cfg!(debug_assertions) {
             self.check(expect);
@@ -639,7 +643,7 @@ impl RowWriter<'_, '_> {
 
     /// The separator after a cell.
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     fn end_cell(&mut self) {
         self.out.push(b',');
     }
@@ -661,7 +665,7 @@ impl RowWriter<'_, '_> {
 
     /// A missing value, in any column: `na_rep`.
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn missing(&mut self) {
         self.begin_cell(None);
         if !self.format.na_empty {
@@ -672,7 +676,7 @@ impl RowWriter<'_, '_> {
 
     /// A `Bool` column's value: `True` or `False`.
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn bool(&mut self, v: bool) {
         self.begin_cell(Some((tablekit::DataType::Bool, CellFormat::Default)));
         write_bool(self.out, v);
@@ -681,10 +685,14 @@ impl RowWriter<'_, '_> {
 
     /// A `Text` column's value, quoted if it holds `,`, `"`, CR or LF.
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn text(&mut self, s: &str) {
         self.begin_cell(Some((tablekit::DataType::Text, CellFormat::Default)));
-        text(self.out, s);
+        if needs_quoting(s.as_bytes()) {
+            text(self.out, s);
+        } else {
+            self.out.extend_from_slice(s.as_bytes());
+        }
         self.end_cell();
     }
 
@@ -713,7 +721,7 @@ impl RowWriter<'_, '_> {
     /// # Ok::<(), tablekit::TableError>(())
     /// ```
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn text_with(&mut self, build: impl FnOnce(&mut TextBuilder<'_>)) {
         self.begin_cell(Some((tablekit::DataType::Text, CellFormat::Default)));
         let start = self.out.len();
@@ -730,7 +738,7 @@ impl RowWriter<'_, '_> {
 
     /// An `F32` column's value, as pandas writes it.
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn f32(&mut self, x: f32) {
         self.begin_cell(Some((tablekit::DataType::F32, CellFormat::Default)));
         if x.is_finite() {
@@ -743,7 +751,7 @@ impl RowWriter<'_, '_> {
 
     /// An `F64` column's value, as pandas writes it.
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn f64(&mut self, x: f64) {
         self.begin_cell(Some((tablekit::DataType::F64, CellFormat::Default)));
         if x.is_finite() {
@@ -757,7 +765,7 @@ impl RowWriter<'_, '_> {
     /// An `F64` column with [`CellFormat::Fixed`]`(D)`: exactly `D` decimals. `D` above
     /// [`MAX_FIXED_DECIMALS`] does not compile.
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn fixed<const D: u8>(&mut self, x: f64) {
         self.begin_cell(Some((tablekit::DataType::F64, CellFormat::Fixed(D))));
         self.fixed_cell::<D>(x);
@@ -766,7 +774,7 @@ impl RowWriter<'_, '_> {
 
     /// An `F32` column with [`CellFormat::Fixed`]`(D)`, as [`RowWriter::fixed`].
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn fixed_f32<const D: u8>(&mut self, x: f32) {
         self.begin_cell(Some((tablekit::DataType::F32, CellFormat::Fixed(D))));
         self.fixed_cell::<D>(f64::from(x));
@@ -774,7 +782,7 @@ impl RowWriter<'_, '_> {
     }
 
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     fn fixed_cell<const D: u8>(&mut self, x: f64) {
         if x.is_finite() {
             fixed::<D>(self.out, x);
@@ -788,7 +796,7 @@ impl RowWriter<'_, '_> {
     /// The value's own type picks the column type it is checked against, so give a literal
     /// one (`0x2F_u16`).
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn hex<const W: u8>(&mut self, v: impl HexValue) {
         self.begin_cell(Some((v.data_type(), CellFormat::HexUpper(W))));
         hex_const::<W>(self.out, v.into_u64(), HEX_UPPER);
@@ -797,7 +805,7 @@ impl RowWriter<'_, '_> {
 
     /// As [`RowWriter::hex`], lower case ([`CellFormat::HexLower`]`(W)`).
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn hex_lower<const W: u8>(&mut self, v: impl HexValue) {
         self.begin_cell(Some((v.data_type(), CellFormat::HexLower(W))));
         hex_const::<W>(self.out, v.into_u64(), HEX_LOWER);
@@ -811,7 +819,7 @@ impl RowWriter<'_, '_> {
     /// [`TableError::RowLength`] for the wrong number of cells, or, in debug builds,
     /// [`TableError::ValueType`] for a cell whose method did not suit its column; the row is
     /// taken back.
-    #[inline]
+    #[inline(always)]
     pub fn finish(self) -> Result<(), TableError> {
         let expected = self.format.schema.len();
         if self.col != expected {
@@ -835,7 +843,7 @@ macro_rules! row_writer_integers {
             $(
                 #[doc = concat!("A `", stringify!($data_type), "` column's value, in decimal.")]
                 // HOT PATH: per value.
-                #[inline]
+                #[inline(always)]
                 pub fn $name(&mut self, v: $ty) {
                     self.begin_cell(Some((tablekit::DataType::$data_type, CellFormat::Default)));
                     integer(self.out, v);
@@ -859,31 +867,45 @@ pub struct TextBuilder<'o> {
     quote: bool,
 }
 
+#[expect(
+    clippy::inline_always,
+    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+)]
 impl TextBuilder<'_> {
     /// Appends `n` in decimal, zero-padded to at least `width` digits.
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn digits(&mut self, n: u64, width: usize) {
-        // `width` digits filled from the right: with the width a constant at the call, as a
-        // timestamp's fields are, this compiles to straight-line code. A number with more
-        // digits than that takes the general path.
-        let start = self.out.len();
-        self.out.resize(start + width, b'0');
+        // Laid out in a buffer on the stack, already zero-padded, then copied whole -- a
+        // copy of a fixed size, which compiles to a few stores -- and the output trimmed
+        // to length. A copy of the digits alone has a length known only when running, and
+        // each was a `memcpy` call (callgrind, a 46-column row with a built timestamp).
+        const ROOM: usize = 20; // u64::MAX has 20 digits
+        let count = n.checked_ilog10().map_or(1, |log| log as usize + 1);
+        if width > ROOM {
+            for _ in count..width {
+                self.out.push(b'0');
+            }
+            self.out
+                .extend_from_slice(itoa::Buffer::new().format(n).as_bytes());
+            return;
+        }
+        let total = count.max(width);
+        let mut buffer = [b'0'; ROOM];
         let mut rest = n;
-        for slot in self.out[start..].iter_mut().rev() {
+        for slot in buffer[..total].iter_mut().rev().take(count) {
             *slot = b'0' + u8::try_from(rest % 10).unwrap_or(0);
             rest /= 10;
         }
-        if rest != 0 || width == 0 {
-            self.out.truncate(start);
-            wide_digits(self.out, n, width);
-        }
+        let start = self.out.len();
+        self.out.extend_from_slice(&buffer);
+        self.out.truncate(start + total);
     }
 
     /// Appends one ASCII character. A byte that is not ASCII would make the cell invalid
     /// UTF-8, so it is written as U+FFFD instead.
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn push(&mut self, c: u8) {
         if c.is_ascii() {
             self.quote |= matches!(c, b',' | b'"' | b'\r' | b'\n');
@@ -895,7 +917,7 @@ impl TextBuilder<'_> {
 
     /// Appends text, which is read once to tell whether the cell needs quoting.
     // HOT PATH: per value.
-    #[inline]
+    #[inline(always)]
     pub fn push_str(&mut self, s: &str) {
         self.quote |= needs_quoting(s.as_bytes());
         self.out.extend_from_slice(s.as_bytes());
@@ -949,7 +971,11 @@ fn hex(out: &mut Vec<u8>, v: u64, width: u8, digits: &[u8; 16]) {
 /// [`hex`] for a width known when compiling: a value that fits it, the common case, is
 /// written without a loop.
 // HOT PATH: per value.
-#[inline]
+#[expect(
+    clippy::inline_always,
+    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+)]
+#[inline(always)]
 fn hex_const<const W: u8>(out: &mut Vec<u8>, v: u64, digits: &[u8; 16]) {
     const { assert!(W >= 1 && W <= 16, "hexadecimal width must be 1 to 16") };
     if W < 16 && v >> (u32::from(W) * 4) != 0 {
@@ -973,7 +999,11 @@ fn hex_const<const W: u8>(out: &mut Vec<u8>, v: u64, digits: &[u8; 16]) {
 /// written from that integer, with divisions by a constant; anything else goes through
 /// `core::fmt`, which is exact.
 // HOT PATH: per value.
-#[inline]
+#[expect(
+    clippy::inline_always,
+    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+)]
+#[inline(always)]
 fn fixed<const D: u8>(out: &mut Vec<u8>, x: f64) {
     let scale: u64 = const {
         assert!(
@@ -1047,26 +1077,16 @@ fn whole_units(v: f64, scale: u64) -> Option<u64> {
     (back.to_bits() == v.to_bits()).then_some(units)
 }
 
-/// [`TextBuilder::digits`] for a number with more digits than its width (or a width of 0).
-// HOT PATH: per value (a field written unpadded, as a day of the year is).
-#[inline]
-fn wide_digits(out: &mut Vec<u8>, n: u64, width: usize) {
-    let needed = n.checked_ilog10().map_or(1, |log| log as usize + 1);
-    let start = out.len();
-    out.resize(start + needed.max(width), b'0');
-    let mut rest = n;
-    for slot in out[start..].iter_mut().rev() {
-        *slot = b'0' + u8::try_from(rest % 10).unwrap_or(0);
-        rest /= 10;
-    }
-}
-
 /// `True` or `False`. Four bytes are always copied (`True` or `Fals`) and the `e` of `False`
 /// is pushed after: two fixed-size stores. Written as one copy of 4 or 5 bytes, the compiler
 /// may merge the two into a single copy of variable length, a `memcpy` call per value, which
 /// it did in `CsvFormat::row` once this crate had more callers (callgrind, 0.7.0).
 // HOT PATH: per value.
-#[inline]
+#[expect(
+    clippy::inline_always,
+    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+)]
+#[inline(always)]
 fn write_bool(out: &mut Vec<u8>, b: bool) {
     out.extend_from_slice(if b { b"True" } else { b"Fals" });
     if !b {
@@ -1076,7 +1096,11 @@ fn write_bool(out: &mut Vec<u8>, b: bool) {
 
 /// Whether `bytes` hold a `,`, `"`, CR or LF, and so must be quoted.
 // HOT PATH: per value.
-#[inline]
+#[expect(
+    clippy::inline_always,
+    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+)]
+#[inline(always)]
 fn needs_quoting(bytes: &[u8]) -> bool {
     bytes
         .iter()
