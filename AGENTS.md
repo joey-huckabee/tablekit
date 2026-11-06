@@ -75,10 +75,14 @@ ROADMAP.md               what comes next, and the analysis behind it
 - Every use case in the API documentation is a runnable example, compiled and run by
   `cargo test`.
 
-## Testing is local
+## Testing
 
-The repository is private, so **there is no CI and none should be added**. Run the checks
-yourself before pushing; the commands are in `README.md`.
+GitHub Actions runs the Rust checks on pull requests and `main`, with a weekly dependency
+audit. The owner approved CI for this private repository, replacing the earlier no-CI rule.
+Run the checks yourself before pushing; the commands are in `README.md` and the matrix and
+security policy are in `docs/CI.md`. Use only the repository's synthetic fixtures: CI must
+not fetch production data, reference repositories or secrets, publish packages or releases,
+or require external analysis services.
 
 ## Git conventions
 

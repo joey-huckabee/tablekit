@@ -1,0 +1,84 @@
+name: Rust
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 2
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rust:
+    name: Rust ${{ matrix.rust }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            rust: stable
+          - os: windows-2025
+            rust: stable
+          - os: ubuntu-24.04
+            rust: '1.85.0'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        env:
+          RUST_TOOLCHAIN: ${{ matrix.rust }}
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
+          rustc +"$RUST_TOOLCHAIN" --version --verbose
+          cargo +"$RUST_TOOLCHAIN" --version
+
+      - name: Install formatting and lint tools
+        if: matrix.os == 'ubuntu-24.04' && matrix.rust == 'stable'
+        run: rustup component add --toolchain stable rustfmt clippy
+
+      - name: Check formatting
+        if: matrix.os == 'ubuntu-24.04' && matrix.rust == 'stable'
+        run: cargo +stable fmt --all --check
+
+      - name: Check Clippy without warnings
+        if: matrix.os == 'ubuntu-24.04' && matrix.rust == 'stable'
+        run: cargo +stable clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Build documentation without warnings
+        if: matrix.os == 'ubuntu-24.04' && matrix.rust == 'stable'
+        run: cargo +stable doc --locked --workspace --no-deps
+
+      - name: Build every target on MSRV
+        if: matrix.rust == '1.85.0'
+        run: cargo +1.85.0 build --locked --workspace --all-targets
+
+      - name: Test on MSRV, including documentation examples
+        if: matrix.rust == '1.85.0'
+        run: cargo +1.85.0 test --locked --workspace
+
+      # Do not add --all-targets: that option skips doctests. This command
+      # includes unit/integration tests, expected-file tests and doctests.
+      - name: Test release, including documentation examples
+        if: matrix.rust == 'stable'
+        run: cargo +stable test --locked --workspace --release
