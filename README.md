@@ -27,6 +27,13 @@ Parquet file has the types Impala reads, and no tool's output drifts from anothe
 | [AGENTS.md](AGENTS.md) | The rules for working in this repository |
 | `cargo doc --open` | The API, with runnable examples |
 
+## 0.7.0 version scope
+
+Only `tablekit-csv` advances to 0.7.0; model/tablekit and Parquet remain 0.6.0 and
+`tablekit-profile` remains 0.6.1, preserving Parquet writer metadata. Exhaustive `CsvOptions`
+literals need `cell_formats` or `..CsvOptions::default()`. See
+[release validation and downstream migration](docs/CSV-070-VALIDATION.md).
+
 ## Use
 
 Add the crates you need, pinned to a commit:
@@ -59,7 +66,11 @@ Every call returns `Result<_, tablekit::TableError>`.
 For a table too large to hold at once, implement `tablekit::Source` (a batch at a time) and
 write it with `tablekit_csv::write_source_file` or `tablekit_parquet::write_source_file`; or
 drive `CsvWriter` and `ParquetWriter` yourself. A tool that writes CSV as it reads each
-record uses `tablekit_csv::CsvFormat`, a row at a time into its own buffer.
+record uses `tablekit_csv::CsvFormat`, a row at a time into its own buffer; one whose columns
+are fixed in its code can write each row a cell at a time with `CsvFormat::begin_row`
+(`RowWriter`), at the speed of a writer hand-written for those columns. A column can be
+written in hexadecimal or with fixed decimals (`CsvOptions::cell_formats`,
+[docs/CSV-FORMAT.md](docs/CSV-FORMAT.md#cell-formats)).
 
 Every change that touches the writing path is measured against what it replaces, A against
 B on the same input, byte-identical output, wall time and callgrind instruction counts; a

@@ -7,6 +7,67 @@ called out under **Format**.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-06
+
+### Release scope and migration
+
+- Release preparation only: `tablekit-csv` advances to 0.7.0. Model/tablekit and Parquet
+  remain 0.6.0; tablekit-profile remains 0.6.1. Parquet `created_by` metadata is unchanged.
+- Add `cell_formats: Vec::new()` or `..CsvOptions::default()` to exhaustive options literals.
+  Update consumer Git pins consistently and regenerate/audit each consumer lockfile.
+- Duplicate format names are rejected even when the first entry is `Default`.
+- Dropping an unfinished row now rolls it back, including during unwind; only `finish()`
+  commits. Existing successful rows are unchanged. Public fast-method checks remain
+  debug-only; use `CsvFormat::row` for always-checked dynamic rows.
+- Quoted built text uses the reusable output buffer instead of a per-cell scratch Vec.
+  Both Git hooks are executable (100755).
+
+### Added -- cell formats and the row writer (tablekit-csv)
+
+- **`CsvOptions::cell_formats`**: a column can be written as upper- or lower-case
+  hexadecimal (`CellFormat::HexUpper(w)`, `HexLower(w)`) or with a fixed number of
+  decimals (`CellFormat::Fixed(d)`), for tools whose users compare raw machine words and
+  measured intervals. Each matches what pandas writes after Python's own `format(v, "04X")`
+  or `f"{v:.6f}"`; `testdata/expected/csv/table-formats.csv` is that file, written by pandas
+  3.0.6 and NumPy 2.5.3 (`make.py`). A format the column's type cannot take is refused when
+  the format is built. Every way in -- a batch, `CsvFormat::row`, the row writer -- writes
+  the same bytes for it.
+- **`RowWriter`** (`CsvFormat::begin_row`, `CsvWriter::write_row_with`): a row written a cell
+  at a time, one method per column named for its type and format (`u16`, `text`,
+  `hex::<4>`, `fixed::<6>`, `text_with` for text built from numbers through a
+  `TextBuilder`). It writes the bytes `CsvFormat::row` writes for the same values (20,000
+  random rows of every type and format, both `na_rep`s), quotes text wherever it needs it,
+  and refuses a row with the wrong number of cells, in every build; whether each method
+  suits its column is checked in debug builds.
+- Historical author-head measurement, not rerun for this candidate: on x86 (GitHub-hosted AMD EPYC runner) on aero1553's 21 MB golden 1553 recording
+  (460,575 records, 46 columns: a timestamp built from numbers, 32 hex words, a six-decimal
+  interval), rendering only, one thread, best of 15 interleaved rounds, three runs:
+  aero1553's own hand-written writer 158 ns per record, `RowWriter` 154 ns (0.98x), the bytes
+  identical. Built into aero1553 in place of its writer, a whole decode ran at 1.018x with
+  `--threads 0`, 0.987x with one rendering thread and 0.983x with two (the default), the
+  output identical. Getting there took three changes, each measured: every per-cell method
+  inlined into the caller's row (`inline(always)`, with the lint's reason), the quoting check
+  inlined for text cells, and `TextBuilder::digits` copying a fixed 20-byte buffer rather than
+  a slice whose length is known only when running -- each such copy had been a `memcpy`
+  call. Before them the same decode ran at 1.20x on aarch64.
+
+### Changed
+
+- `CsvOptions` adds `cell_formats`; exhaustive Rust literals must include it or use the
+  default update syntax. Nothing written changes for a table without cell formats.
+- `True` and `False` use a constant five-byte copy, trimming the spare byte of `True`.
+  This preserves bytes without a variable-size copy or conditional extra store. The existing
+  unformatted `row` and `value` functions are forced inline based on the ARM comparison.
+- Current synthetic ARM A/B (200,000 rows, seven columns, 21 randomized paired trials):
+  median main/candidate ms: row 18.420542/18.333778 (roughly neutral), batch
+  19.721945/18.439129, writer 19.766827/18.475552. All bytes match. Whole-process Callgrind
+  instructions for row increase 1.12% (344,477,827/348,326,895); batch/writer decrease about
+  5.35% (366,047,760/346,476,592 and 366,047,767/346,476,598). The instruction cost is
+  disclosed for review; not every metric improves. Final-source Windows timing remains a
+  coordinator release gate. [Protocol, scope and earlier evidence](docs/CSV-070-VALIDATION.md).
+- Warmed quoted-text probe: 10,000 rows add 10,000 allocations on the author head and zero
+  on the candidate; Memcheck reports no errors. No golden files were regenerated.
+
 ### Security
 
 - Update only the locked Zstandard wrappers: zstd 0.13.3 to 0.13.4 and zstd-safe 7.3.0
