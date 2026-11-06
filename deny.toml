@@ -1,0 +1,17 @@
+# Only `cargo deny --locked --workspace check advisories sources` is policy.
+# No license allowlist, duplicate-version ban or blanket crate bans.
+[advisories]
+# Vulnerability and unsound advisories fail. Unmaintained advisories remain
+# visible for review; yanks warn because existing locked builds remain valid.
+db-urls = ["https://github.com/RustSec/advisory-db"]
+yanked = "warn"
+unmaintained = "all"
+unsound = "all"
+ignore = []
+
+[sources]
+# All external dependencies currently come from crates.io. A new source needs
+# explicit review here; local workspace paths remain allowed.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -75,6 +75,11 @@ Compression, dictionary encoding, data page size and encoder batch size belong t
 Gzip uses the Rust flate2 backend; Zstandard uses the zstd codec enabled in the Parquet
 crate. Defaults retain the previous writer settings and schema/value contract.
 
+The validated workspace lockfile uses zstd 0.13.4 and zstd-safe 7.4.0 for the 2026 Zstandard
+security fixes, with Parquet and the native codec unchanged. Consumers must update their own
+lockfiles; pinning tablekit alone does not constrain these transitive versions. See
+[the dependency policy and downstream follow-ups](CI.md#zstandard-security-update-and-consumer-lockfiles).
+
 Page size is approximate: the encoder checks boundaries between internal batches, and
 an individual value can exceed the limit. Encoder batches are not row groups. Each call
 to `write_batch` still writes one row group; gathering batches to a target row-group size

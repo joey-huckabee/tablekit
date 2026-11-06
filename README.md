@@ -67,15 +67,18 @@ change that is slower is not merged. CHANGELOG.md records the figures.
 
 ## Build and test
 
-Rust 1.85 or later. There is no CI; run these before pushing:
+Rust 1.85 or later, on 64-bit targets. GitHub Actions checks stable on Linux and Windows,
+and Rust 1.85.0 on Linux. See [docs/CI.md](docs/CI.md) for the matrix, dependency audit policy
+and action pins. Run these before pushing:
 
 ```bash
 git config core.hooksPath .githooks       # once per clone
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-cargo test --workspace --release
-cargo +1.85 build --workspace --all-targets
+cargo +stable fmt --all --check
+cargo +stable clippy --locked --workspace --all-targets -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo +stable doc --locked --workspace --no-deps
+cargo +stable test --locked --workspace --release
+cargo +1.85.0 build --locked --workspace --all-targets
+cargo +1.85.0 test --locked --workspace
 ```
 
 The expected files come from pandas and NumPy themselves. To regenerate them (pandas 3,
