@@ -11,8 +11,7 @@ called out under **Format**.
 
 ### Release scope and migration
 
-- Release preparation only: `tablekit-csv` advances to 0.7.0. Model/tablekit and Parquet
-  remain 0.6.0; tablekit-profile remains 0.6.1. Parquet `created_by` metadata is unchanged.
+- `tablekit-csv` advances to 0.7.0. Model/tablekit and Parquet remain 0.6.0; tablekit-profile remains 0.6.1. Parquet `created_by` metadata is unchanged.
 - Add `cell_formats: Vec::new()` or `..CsvOptions::default()` to exhaustive options literals.
   Update consumer Git pins consistently and regenerate/audit each consumer lockfile.
 - Duplicate format names are rejected even when the first entry is `Default`.
@@ -63,8 +62,13 @@ called out under **Format**.
   19.721945/18.439129, writer 19.766827/18.475552. All bytes match. Whole-process Callgrind
   instructions for row increase 1.12% (344,477,827/348,326,895); batch/writer decrease about
   5.35% (366,047,760/346,476,592 and 366,047,767/346,476,598). The instruction cost is
-  disclosed for review; not every metric improves. Final-source Windows timing remains a
-  coordinator release gate. [Protocol, scope and earlier evidence](docs/CSV-070-VALIDATION.md).
+  accepted by the coordinator with neutral row wall time and improvements in the other
+  paths; not every metric improves.
+- Final Windows x86 remeasurement at source `7960a9fa9defee05704cc807cdfa854659633adb`
+  passed: median baseline/final ms batch 40.5565/34.1207, writer 40.6024/34.1858, row
+  39.5497/35.5720. All paired trials were faster and all bytes identical. Stable/MSRV each
+  passed 58 tests including doctests, and all four hosted checks passed at that source.
+  [Protocol, scope and historical evidence](docs/CSV-070-VALIDATION.md).
 - Warmed quoted-text probe: 10,000 rows add 10,000 allocations on the author head and zero
   on the candidate; Memcheck reports no errors. No golden files were regenerated.
 

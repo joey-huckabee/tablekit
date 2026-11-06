@@ -1,8 +1,10 @@
-# CSV 0.7.0 candidate validation
+# CSV 0.7.0 validation evidence
 
-This is release preparation, not evidence that v0.7.0 has been tagged. The coordinator owns
-merge, final platform review and release. Only tablekit-csv advances to 0.7.0; tablekit and
-Parquet stay 0.6.0, profile stays 0.6.1, and Parquet writer metadata stays `tablekit 0.6.0`.
+Evidence recorded on 2026-11-06 at source `7960a9fa9defee05704cc807cdfa854659633adb`,
+merged unchanged in `325ca295c744ab843a7a8cd271a750001e179c2a`. These results do not claim
+that a v0.7.0 tag already exists; the coordinator owns tagging and the GitHub release after
+this documentation update. Only tablekit-csv advances to 0.7.0; tablekit and Parquet stay
+0.6.0, profile stays 0.6.1, and Parquet writer metadata stays `tablekit 0.6.0`.
 
 ## Reviewed behavior
 
@@ -54,8 +56,9 @@ trials, one unmeasured warm-up and one measured render per process. Medians:
 
 Row wall time is roughly neutral/slightly better; **row instructions increase 1.12%**.
 Batch/writer wall times improve about 6.5%, and instructions fall about 5.35%. This is a
-trade-off for review, not a claim that every metric improves or that arbitrary inputs cannot
-regress. It supersedes the earlier author-head ARM/x86 instruction figures for this probe.
+trade-off accepted by the coordinator with neutral row wall time and improvements in the
+other paths, not a claim that every metric improves or that arbitrary inputs cannot regress.
+It supersedes the earlier author-head ARM/x86 instruction figures for this probe.
 Valgrind 3.19 Callgrind Ir here is **whole process**, including deterministic input setup,
 one render, checksum and output write; native wall timing excludes setup/checksum/I/O.
 Do not compare these absolute counts with the author's render-only counts. Function-toggle
@@ -77,17 +80,47 @@ Memcheck reports zero errors. The counts include process/setup allocations; the 
 zero **additional** allocations for warmed rows, not an allocation-free process. Output
 capacity/pointer checks and byte tests independently cover in-place expansion and prefixes.
 
-## Windows evidence and remaining release gate
+## Final Windows x86 measurements
 
-Coordinator-provided Windows x86 / Rust 1.99.0 measurements used seven randomized-order
-trials with five warmed rounds each at 200,000 rows, comparing the scratch five-byte body on
-ac355ae to baseline. Median ms, main/candidate: batch 40.6591/38.7886, writer
-40.6600/39.2757, row 39.4814/37.7606. All bytes and the hash above matched. Those results
-support the fixed-size copy, but **do not validate the final two inline hints**. The exact
-pushed final source must be remeasured on Windows before release. The coordinator owns that
-check and decides whether the disclosed instruction trade-off is acceptable; no gate is
-silently waived. The author's earlier vendor-writer integration figures in CHANGELOG are
+The coordinator remeasured exact source `7960a9fa9defee05704cc807cdfa854659633adb` on
+Windows x86 MSVC, Rust 1.99.0, release fat LTO, one codegen unit and debug info level 1.
+Baseline was c26e090; its CSV/model sources and manifests were verified identical to merged
+main 77cb72f. Input was the same 200,000 invented rows used above. Nine alternating ABBA
+trial pairs, five warmed timed rounds per trial, median of trial medians:
+
+| Existing API | Baseline wall ms | Final wall ms | Final/baseline ratio |
+|---|---:|---:|---:|
+| write_to batch | 40.5565 | 34.1207 | 0.841313 |
+| CsvWriter batch | 40.6024 | 34.1858 | 0.841965 |
+| CsvFormat::row | 39.5497 | 35.5720 | 0.899425 |
+
+Every paired trial was faster in all three modes. Each output was 12,105,974 bytes with
+SHA-256 `2011c6d46ba25b78af522a865e7f9f323a5abba69826e0af34b3e4d5b4f28a42`.
+The final Windows performance check passed. The coordinator accepted the disclosed ARM row
+instruction cost; no performance review gate remains unresolved.
+
+### Historical preliminary measurements
+
+Earlier coordinator-provided Windows x86 / Rust 1.99.0 measurements used seven
+randomized-order trials with five warmed rounds each at 200,000 rows, comparing a scratch
+five-byte body on ac355ae to baseline. Median ms, main/scratch: batch 40.6591/38.7886,
+writer 40.6600/39.2757, row 39.4814/37.7606. All bytes and the hash matched. These preliminary
+results did not include the final two inline hints and are superseded by the exact-source
+results above. The author's earlier vendor-writer integration figures in CHANGELOG are
 historical and were not reproduced using production/reference inputs here.
+
+## Runtime validation at source 7960a9f
+
+Stable release and Rust 1.85 debug each passed **58 tests including doctests**, with zero
+failures. The MSRV all-target build, formatting, strict Clippy/rustdoc, workflow validation,
+security audit, executable hook checks, relative links and CSV-only lockfile diff passed.
+All four hosted checks passed at the same source:
+
+- [Rust stable Linux, stable Windows and Rust 1.85 Linux](https://github.com/joey-huckabee/tablekit/actions/runs/42230817850).
+- [RustSec advisories and dependency sources](https://github.com/joey-huckabee/tablekit/actions/runs/42230817899).
+
+This documentation-only completion records existing validation; it does not represent a new
+runtime build, test run or release tag.
 
 ## Reproduction commands
 
