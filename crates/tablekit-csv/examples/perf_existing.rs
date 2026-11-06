@@ -56,7 +56,7 @@ fn input(n: usize) -> Result<(Batch, Vec<Row>), Box<dyn std::error::Error>> {
     Ok((batch, rows))
 }
 
-// Keep a visible function boundary for Callgrind's --toggle-collect='*perf_existing*render*'.
+// Keep a visible function boundary for profiling; use whole-process collection on ARM.
 #[inline(never)]
 fn render(
     mode: &str,

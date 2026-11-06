@@ -166,10 +166,7 @@ fn write_cells(r: &mut RowWriter<'_, '_>, i: usize) {
 fn a_batch_writes_what_python_formats() {
     let mut out = Vec::new();
     write_to(&mut out, &batch(), &options()).unwrap();
-    assert_eq!(
-        String::from_utf8_lossy(&out),
-        String::from_utf8_lossy(&expected())
-    );
+    assert_eq!(out, expected());
 }
 
 #[test]
@@ -181,10 +178,7 @@ fn row_writes_what_python_formats() {
     for i in 0..10 {
         format.row(&mut out, &row_values(i)).unwrap();
     }
-    assert_eq!(
-        String::from_utf8_lossy(&out),
-        String::from_utf8_lossy(&expected())
-    );
+    assert_eq!(out, expected());
 }
 
 #[test]
@@ -197,10 +191,7 @@ fn the_row_writer_writes_what_python_formats() {
         write_cells(&mut r, i);
         r.finish().unwrap();
     }
-    assert_eq!(
-        String::from_utf8_lossy(&out),
-        String::from_utf8_lossy(&expected())
-    );
+    assert_eq!(out, expected());
 }
 
 #[test]
@@ -211,10 +202,7 @@ fn csv_writer_rows_write_what_python_formats() {
     }
     let (out, rows) = w.finish().unwrap();
     assert_eq!(rows, 10);
-    assert_eq!(
-        String::from_utf8_lossy(&out),
-        String::from_utf8_lossy(&expected())
-    );
+    assert_eq!(out, expected());
 }
 
 /// A small deterministic generator: the same values on every run.
@@ -874,4 +862,185 @@ fn every_supported_fixed_precision_matches_binary_value_formatting() {
     fixed_precision_boundary::<15>();
     fixed_precision_boundary::<16>();
     fixed_precision_boundary::<17>();
+}
+
+fn hex_width_boundary<const W: u8>() {
+    let mut format = CsvFormat::new(
+        vec![
+            Field {
+                name: "upper".into(),
+                data_type: DataType::U64,
+            },
+            Field {
+                name: "lower".into(),
+                data_type: DataType::U64,
+            },
+        ],
+        CsvOptions {
+            cell_formats: vec![
+                ("upper".into(), CellFormat::HexUpper(W)),
+                ("lower".into(), CellFormat::HexLower(W)),
+            ],
+            ..CsvOptions::default()
+        },
+    )
+    .unwrap();
+    for value in [0, 1, 15, 16, 255, 256, u64::from(u16::MAX), u64::MAX] {
+        let expected = format!(
+            "{value:0width$X},{value:0width$x}\r\n",
+            width = usize::from(W)
+        );
+        let mut out = Vec::new();
+        format
+            .row(&mut out, &[Value::U64(value), Value::U64(value)])
+            .unwrap();
+        assert_eq!(out, expected.as_bytes());
+        out.clear();
+        let mut row = format.begin_row(&mut out);
+        row.hex::<W>(value);
+        row.hex_lower::<W>(value);
+        row.finish().unwrap();
+        assert_eq!(out, expected.as_bytes());
+    }
+}
+
+#[test]
+fn every_supported_hex_width_is_minimum_not_truncation() {
+    hex_width_boundary::<1>();
+    hex_width_boundary::<2>();
+    hex_width_boundary::<3>();
+    hex_width_boundary::<4>();
+    hex_width_boundary::<5>();
+    hex_width_boundary::<6>();
+    hex_width_boundary::<7>();
+    hex_width_boundary::<8>();
+    hex_width_boundary::<9>();
+    hex_width_boundary::<10>();
+    hex_width_boundary::<11>();
+    hex_width_boundary::<12>();
+    hex_width_boundary::<13>();
+    hex_width_boundary::<14>();
+    hex_width_boundary::<15>();
+    hex_width_boundary::<16>();
+}
+
+#[test]
+fn file_and_source_writers_honour_formats_byte_for_byte() {
+    struct Once {
+        fields: Vec<Field>,
+        batch: Option<Batch>,
+    }
+    impl tablekit::Source for Once {
+        type Error = TableError;
+        fn schema(&self) -> Vec<Field> {
+            self.fields.clone()
+        }
+        fn next_batch(&mut self) -> Result<Option<Batch>, TableError> {
+            Ok(self.batch.take())
+        }
+    }
+    let source = || {
+        let batch = batch();
+        Once {
+            fields: batch.schema(),
+            batch: Some(batch),
+        }
+    };
+    let mut out = Vec::new();
+    assert_eq!(
+        tablekit_csv::write_source(&mut out, &mut source(), &options()).unwrap(),
+        10
+    );
+    assert_eq!(out, expected());
+    let dir = std::env::temp_dir().join(format!("tablekit-formats-paths-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, stream) in [("batch.csv", false), ("source.csv", true)] {
+        let path = dir.join(name);
+        let count = if stream {
+            tablekit_csv::write_source_file(&path, &mut source(), &options())
+        } else {
+            tablekit_csv::write_file(&path, &batch(), &options())
+        };
+        assert_eq!(count.unwrap(), 10);
+        assert_eq!(std::fs::read(&path).unwrap(), expected());
+        assert!(!tablekit::temporary_path(&path).exists());
+        std::fs::remove_file(path).unwrap();
+    }
+    std::fs::remove_dir(dir).unwrap();
+}
+
+#[test]
+fn dynamic_rows_are_checked_even_when_fast_row_methods_are_not() {
+    let mut format = two_columns();
+    let mut out = b"kept\r\n".to_vec();
+    assert!(matches!(
+        format.row(&mut out, &[Value::U32(1), Value::Text("ok")]),
+        Err(TableError::ValueType { .. })
+    ));
+    assert_eq!(out, b"kept\r\n");
+    if !cfg!(debug_assertions) {
+        let mut row = format.begin_row(&mut out);
+        row.u32(47); // Deliberately violates U16/HexUpper(4), as documented for the fast API.
+        row.text("ok");
+        row.finish().unwrap();
+        assert_eq!(out, b"kept\r\n47,ok\r\n");
+    }
+}
+
+#[test]
+fn boolean_fixed_copy_handles_empty_and_warm_buffers_without_scratch_bytes() {
+    let mut format = CsvFormat::new(
+        vec![Field {
+            name: "flag".into(),
+            data_type: DataType::Bool,
+        }],
+        CsvOptions::default(),
+    )
+    .unwrap();
+    for capacity in [0, 4, 5, 64] {
+        let mut out = Vec::with_capacity(capacity);
+        for flag in [true, false, true, false] {
+            out.clear();
+            format.row(&mut out, &[Value::Bool(flag)]).unwrap();
+            assert_eq!(
+                out,
+                if flag {
+                    b"True\r\n".as_slice()
+                } else {
+                    b"False\r\n".as_slice()
+                }
+            );
+            out.clear();
+            let mut row = format.begin_row(&mut out);
+            row.bool(flag);
+            row.finish().unwrap();
+            assert_eq!(
+                out,
+                if flag {
+                    b"True\r\n".as_slice()
+                } else {
+                    b"False\r\n".as_slice()
+                }
+            );
+        }
+        let pointer = out.as_ptr();
+        let warm = out.capacity();
+        for i in 0..1000 {
+            out.clear();
+            let mut row = format.begin_row(&mut out);
+            row.bool(i % 2 == 0);
+            row.finish().unwrap();
+            assert!(!out.contains(&0));
+            assert_eq!(out.capacity(), warm);
+            assert_eq!(out.as_ptr(), pointer);
+        }
+    }
+    let mut out = Vec::new();
+    tablekit_csv::write_to(
+        &mut out,
+        &Batch::new(vec![Column::new("flag", Values::Bool(Vec::new()))]).unwrap(),
+        &CsvOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(out, b"flag\r\n");
 }

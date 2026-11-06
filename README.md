@@ -27,6 +27,13 @@ Parquet file has the types Impala reads, and no tool's output drifts from anothe
 | [AGENTS.md](AGENTS.md) | The rules for working in this repository |
 | `cargo doc --open` | The API, with runnable examples |
 
+## 0.7.0 version scope
+
+Only `tablekit-csv` advances to 0.7.0; model/tablekit and Parquet remain 0.6.0 and
+`tablekit-profile` remains 0.6.1, preserving Parquet writer metadata. Exhaustive `CsvOptions`
+literals need `cell_formats` or `..CsvOptions::default()`. See
+[release validation and downstream migration](docs/CSV-070-VALIDATION.md).
+
 ## Use
 
 Add the crates you need, pinned to a commit:

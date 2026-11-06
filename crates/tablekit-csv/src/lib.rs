@@ -259,7 +259,11 @@ impl CsvFormat {
     ///
     /// [`TableError::RowLength`] or [`TableError::ValueType`]; nothing is appended.
     // HOT PATH: per row.
-    #[inline]
+    #[expect(
+        clippy::inline_always,
+        reason = "keep the unformatted row loop in its caller despite the formatted branch"
+    )]
+    #[inline(always)]
     pub fn row(&mut self, out: &mut Vec<u8>, row: &[Value<'_>]) -> Result<(), TableError> {
         if row.len() != self.schema.len() {
             return Err(row_length(self.schema.len(), row.len()));
@@ -426,7 +430,11 @@ impl CsvFormat {
 
     /// Appends one value, or `na_rep` for a missing one or a NaN.
     // HOT PATH: per value.
-    #[inline]
+    #[expect(
+        clippy::inline_always,
+        reason = "preserve inlining of the unformatted value dispatch independently of the formatted paths"
+    )]
+    #[inline(always)]
     fn value(&self, out: &mut Vec<u8>, value: Value<'_>) {
         match value {
             Value::Missing => text(out, &self.options.na_rep),
@@ -1114,21 +1122,20 @@ fn wide_digits(out: &mut Vec<u8>, n: u64, width: usize) {
     out.extend_from_slice(text.as_bytes());
 }
 
-/// `True` or `False`. Four bytes are always copied (`True` or `Fals`) and the `e` of `False`
-/// is pushed after: two fixed-size stores. Written as one copy of 4 or 5 bytes, the compiler
-/// may merge the two into a single copy of variable length, a `memcpy` call per value, which
-/// it did in `CsvFormat::row` once this crate had more callers (callgrind, 0.7.0).
+/// `True` or `False`: copy a constant five bytes, then trim the spare byte of `True`.
+/// The scratch zero never reaches the output. This avoids a variable-length memcpy and
+/// the conditional extra store in the previous implementation; A/B results are recorded
+/// in docs/CSV-070-VALIDATION.md. Reuse warmed capacity, as for `TextBuilder::digits`.
 // HOT PATH: per value.
 #[expect(
     clippy::inline_always,
-    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+    reason = "the fixed-size copy must inline into the value loop"
 )]
 #[inline(always)]
 fn write_bool(out: &mut Vec<u8>, b: bool) {
-    out.extend_from_slice(if b { b"True" } else { b"Fals" });
-    if !b {
-        out.push(b'e');
-    }
+    let start = out.len();
+    out.extend_from_slice(if b { b"True\0" } else { b"False" });
+    out.truncate(start + if b { 4 } else { 5 });
 }
 
 /// Whether `bytes` hold a `,`, `"`, CR or LF, and so must be quoted.

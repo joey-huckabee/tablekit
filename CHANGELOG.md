@@ -39,7 +39,7 @@ called out under **Format**.
   random rows of every type and format, both `na_rep`s), quotes text wherever it needs it,
   and refuses a row with the wrong number of cells, in every build; whether each method
   suits its column is checked in debug builds.
-- Measured on x86 (GitHub-hosted AMD EPYC runner) on aero1553's 21 MB golden 1553 recording
+- Historical author-head measurement, not rerun for this candidate: on x86 (GitHub-hosted AMD EPYC runner) on aero1553's 21 MB golden 1553 recording
   (460,575 records, 46 columns: a timestamp built from numbers, 32 hex words, a six-decimal
   interval), rendering only, one thread, best of 15 interleaved rounds, three runs:
   aero1553's own hand-written writer 158 ns per record, `RowWriter` 154 ns (0.98x), the bytes
@@ -55,20 +55,19 @@ called out under **Format**.
 
 - `CsvOptions` adds `cell_formats`; exhaustive Rust literals must include it or use the
   default update syntax. Nothing written changes for a table without cell formats.
-- `True` and `False` are written with two fixed-size stores (`True`/`Fals`, then `e`), so
-  the compiler cannot merge them into a variable-length copy -- a `memcpy` call per value,
-  which it made of the old form in `CsvFormat::row` once this crate had more code. On its
-  own, against `main`, that is 1.9% fewer instructions for the batch writer and 1.3% fewer
-  for `CsvFormat::row` (callgrind, 20,000 rows of seven columns, one of them `Bool`).
-- **For the reviewer -- the existing paths, a table without cell formats** (x86, callgrind,
-  200,000 rows of seven columns, bytes identical): the batch writer runs 1.25% fewer
-  instructions than `main` (323,312,598 against 327,398,700); `CsvFormat::row` runs 0.57%
-  more (456,233,802 against 453,634,434). Of that, the boolean change alone takes `row` 0.7%
-  below `main`, so the rest of this change costs `row` 1.3%. `row` itself is unchanged apart
-  from one check that measures at nothing; the two compiled loops differ in layout
-  throughout. Wall time on the runners was within their noise. The README's rule is that a
-  slower change is not merged: whether +0.57% on `row` with -1.25% on the batch writer
-  passes is the reviewer's call.
+- `True` and `False` use a constant five-byte copy, trimming the spare byte of `True`.
+  This preserves bytes without a variable-size copy or conditional extra store. The existing
+  unformatted `row` and `value` functions are forced inline based on the ARM comparison.
+- Current synthetic ARM A/B (200,000 rows, seven columns, 21 randomized paired trials):
+  median main/candidate ms: row 18.420542/18.333778 (roughly neutral), batch
+  19.721945/18.439129, writer 19.766827/18.475552. All bytes match. Whole-process Callgrind
+  instructions for row increase 1.12% (344,477,827/348,326,895); batch/writer decrease about
+  5.35% (366,047,760/346,476,592 and 366,047,767/346,476,598). The instruction cost is
+  disclosed for review; not every metric improves. Final-source Windows timing remains a
+  coordinator release gate. [Protocol, scope and earlier evidence](docs/CSV-070-VALIDATION.md).
+- Warmed quoted-text probe: 10,000 rows add 10,000 allocations on the author head and zero
+  on the candidate; Memcheck reports no errors. No golden files were regenerated.
+
 ### Security
 
 - Update only the locked Zstandard wrappers: zstd 0.13.3 to 0.13.4 and zstd-safe 7.3.0
