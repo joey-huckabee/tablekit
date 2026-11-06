@@ -24,12 +24,17 @@ called out under **Format**.
   random rows of every type and format, both `na_rep`s), quotes text wherever it needs it,
   and refuses a row with the wrong number of cells, in every build; whether each method
   suits its column is checked in debug builds.
-- Measured on aero1553's 21 MB golden 1553 recording (460,575 records, 46 columns: a
-  timestamp built from numbers, 32 hex words, a six-decimal interval), rendering only, one
-  thread, best of 15 interleaved rounds, three runs, on an ARM (aarch64) host: aero1553's own
-  hand-written writer 112.6 ns per record, `RowWriter` 109.0 ns (0.97x), the bytes
-  identical; `CsvFormat::row` with the same cell formats 450 ns, since it is the general,
-  fully checked way in. Callgrind: 1,787 against 1,876 instructions per record (1.05x).
+- Measured on x86 (GitHub-hosted AMD EPYC runner) on aero1553's 21 MB golden 1553 recording
+  (460,575 records, 46 columns: a timestamp built from numbers, 32 hex words, a six-decimal
+  interval), rendering only, one thread, best of 15 interleaved rounds, three runs:
+  aero1553's own hand-written writer 158 ns per record, `RowWriter` 154 ns (0.98x), the bytes
+  identical. Built into aero1553 in place of its writer, a whole decode ran at 1.018x with
+  `--threads 0`, 0.987x with one rendering thread and 0.983x with two (the default), the
+  output identical. Getting there took three changes, each measured: every per-cell method
+  inlined into the caller's row (`inline(always)`, with the lint's reason), the quoting check
+  inlined for text cells, and `TextBuilder::digits` copying a fixed 20-byte buffer rather than
+  a slice whose length is known only when running -- each such copy had been a `memcpy`
+  call. Before them the same decode ran at 1.20x on aarch64.
 
 ### Changed
 
@@ -40,13 +45,15 @@ called out under **Format**.
   which it made of the old form in `CsvFormat::row` once this crate had more code. On its
   own, against `main`, that is 1.9% fewer instructions for the batch writer and 1.3% fewer
   for `CsvFormat::row` (callgrind, 20,000 rows of seven columns, one of them `Bool`).
-- **Open before merging:** for a table without cell formats, the batch writer matches that
-  baseline (+551 instructions in all), but `CsvFormat::row` runs 3.5% more instructions
-  per row (34,170,933 against 33,015,029). `row` itself is unchanged apart from one check,
-  which measures at nothing; removing it, keeping `CsvFormat::new` inlinable and moving the
-  formatted paths out of line did not change the figure. The two compiled loops differ in
-  layout throughout. To be measured on x86 before deciding; the README's rule is that a
-  slower change is not merged.
+- **For the reviewer -- the existing paths, a table without cell formats** (x86, callgrind,
+  200,000 rows of seven columns, bytes identical): the batch writer runs 1.25% fewer
+  instructions than `main` (323,312,598 against 327,398,700); `CsvFormat::row` runs 0.57%
+  more (456,233,802 against 453,634,434). Of that, the boolean change alone takes `row` 0.7%
+  below `main`, so the rest of this change costs `row` 1.3%. `row` itself is unchanged apart
+  from one check that measures at nothing; the two compiled loops differ in layout
+  throughout. Wall time on the runners was within their noise. The README's rule is that a
+  slower change is not merged: whether +0.57% on `row` with -1.25% on the batch writer
+  passes is the reviewer's call.
 
 ### Documentation
 
