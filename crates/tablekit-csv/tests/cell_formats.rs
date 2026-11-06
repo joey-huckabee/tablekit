@@ -511,6 +511,33 @@ fn built_text_is_quoted_when_it_needs_to_be() {
         }),
         "18446744073709551615\r\n"
     );
+    // Every branch of digits(): a number that fits its width, one wider than it, zero, a
+    // width of zero, a width beyond any u64's digits, and every power of ten's edges.
+    assert_eq!(built(&|t| t.digits(0, 0)), "0\r\n");
+    assert_eq!(built(&|t| t.digits(0, 3)), "000\r\n");
+    assert_eq!(built(&|t| t.digits(192, 1)), "192\r\n");
+    assert_eq!(built(&|t| t.digits(5, 22)), format!("{:022}\r\n", 5));
+    assert_eq!(
+        built(&|t| t.digits(u64::MAX, 20)),
+        "18446744073709551615\r\n"
+    );
+    assert_eq!(
+        built(&|t| t.digits(u64::MAX, 25)),
+        format!("{:025}\r\n", u64::MAX)
+    );
+    let mut n = 1_u64;
+    for _ in 0..19 {
+        for v in [n - 1, n, n + 1] {
+            for width in [0, 1, 2, 6, 19, 20] {
+                assert_eq!(
+                    built(&|t| t.digits(v, width)),
+                    format!("{v:0width$}\r\n"),
+                    "{v} {width}"
+                );
+            }
+        }
+        n *= 10;
+    }
 }
 
 #[test]
