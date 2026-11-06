@@ -105,6 +105,20 @@ text; `table-formats.csv` in `testdata/expected/csv/` was written that way.
 Every way in writes the same bytes for a formatted column: a batch, `CsvFormat::row`, and
 the row writer (`RowWriter`), whose methods name the format (`hex::<4>`, `fixed::<6>`).
 
+The row writer is for fixed-schema caller code. Its method/type/format agreement is checked
+in debug builds only: release builds write the method requested, without applying or
+validating the declared column format. Test every caller row shape in debug builds. Use
+`CsvFormat::row` for data-dependent methods or schemas; it validates types in every build.
+Cell counts and CSV quoting are checked in every build. Errors roll back the row. Dropping
+an unfinished row also rolls it back, including on unwind; only `finish()` commits it.
+`TextBuilder::push` accepts ASCII bytes, replacing a non-ASCII byte with U+FFFD; use
+`push_str` for Unicode. `digits` pads to at least its width (including widths 0 and over 20),
+never truncating the number. Reuse a buffer large enough for the largest row to avoid growth.
+`MAX_FIXED_DECIMALS = 17` is the supported decimal-place policy, not a bound on the exact
+decimal expansion of a float. Hexadecimal widths outside 1–16 and fixed precision above 17
+are refused at format construction; out-of-range const-generic methods fail to compile.
+
+
 Hexadecimal and fixed decimals are not pandas defaults; they exist for tools whose users
 read raw machine words and measured intervals, where the shortest float (`1.5e-05`) or a
 decimal word (`1024`) is not what they compare against.

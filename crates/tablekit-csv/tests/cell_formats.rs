@@ -686,3 +686,192 @@ fn debug_builds_refuse_a_cell_that_does_not_suit_its_column() {
         }
     }
 }
+
+#[test]
+fn duplicate_default_formats_are_refused() {
+    for second in [CellFormat::Default, CellFormat::HexUpper(4)] {
+        assert!(
+            formats_error(vec![
+                ("w".into(), CellFormat::Default),
+                ("w".into(), second)
+            ])
+            .contains("twice")
+        );
+    }
+}
+
+#[test]
+fn unfinished_rows_roll_back_including_unwinding() {
+    let format = two_columns();
+    let mut out = b"kept\r\n".to_vec();
+    {
+        let mut row = format.begin_row(&mut out);
+        row.hex::<4>(1_u16);
+    }
+    assert_eq!(out, b"kept\r\n");
+    {
+        let mut row = format.begin_row(&mut out);
+        row.hex::<4>(2_u16);
+        row.text("complete but not committed");
+    }
+    assert_eq!(out, b"kept\r\n");
+    let cancelled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut row = format.begin_row(&mut out);
+        row.hex::<4>(3_u16);
+        row.text_with(|text| {
+            text.push_str("partial,\"é");
+            panic!("synthetic cancellation");
+        });
+    }));
+    assert!(cancelled.is_err());
+    assert_eq!(out, b"kept\r\n");
+    let mut row = format.begin_row(&mut out);
+    row.hex::<4>(4_u16);
+    row.text("ok");
+    row.finish().unwrap();
+    assert_eq!(out, b"kept\r\n0004,ok\r\n");
+}
+
+#[test]
+fn writer_reuses_buffer_after_errors_and_cancellation() {
+    let mut writer = CsvWriter::new(
+        Vec::new(),
+        two_columns().schema().to_vec(),
+        CsvOptions {
+            cell_formats: vec![("w".into(), CellFormat::HexUpper(4))],
+            ..CsvOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(writer.write_row_with(|row| row.hex::<4>(1_u16)).is_err());
+    let cancelled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = writer.write_row_with(|row| {
+            row.hex::<4>(2_u16);
+            row.text_with(|text| {
+                text.push_str("half,");
+                panic!("synthetic cancellation");
+            });
+        });
+    }));
+    assert!(cancelled.is_err());
+    writer
+        .write_row_with(|row| {
+            row.hex::<4>(3_u16);
+            row.text("ok");
+        })
+        .unwrap();
+    let (out, rows) = writer.finish().unwrap();
+    assert_eq!(rows, 1);
+    assert_eq!(out, b"w,t\r\n0003,ok\r\n");
+}
+
+#[test]
+fn quoted_text_reuses_capacity_and_preserves_previous_bytes() {
+    let format = CsvFormat::new(
+        vec![Field {
+            name: "text".into(),
+            data_type: DataType::Text,
+        }],
+        CsvOptions::default(),
+    )
+    .unwrap();
+    let mut out = Vec::with_capacity(4096);
+    let pointer = out.as_ptr();
+    let capacity = out.capacity();
+    for _ in 0..2000 {
+        out.clear();
+        out.extend_from_slice(b"prefix\r\n");
+        let mut row = format.begin_row(&mut out);
+        row.text_with(|text| {
+            text.push_str("é,\"quoted\"\r\n");
+            text.push(b'"');
+            text.digits(u64::MAX, 21);
+        });
+        row.finish().unwrap();
+        assert_eq!(
+            out,
+            "prefix\r\n\"é,\"\"quoted\"\"\r\n\"\"018446744073709551615\"\r\n".as_bytes()
+        );
+        assert_eq!(out.as_ptr(), pointer);
+        assert_eq!(out.capacity(), capacity);
+    }
+}
+
+fn fixed_precision_boundary<const D: u8>() {
+    let mut format = CsvFormat::new(
+        vec![
+            Field {
+                name: "x".into(),
+                data_type: DataType::F64,
+            },
+            Field {
+                name: "y".into(),
+                data_type: DataType::F32,
+            },
+        ],
+        CsvOptions {
+            cell_formats: vec![
+                ("x".into(), CellFormat::Fixed(D)),
+                ("y".into(), CellFormat::Fixed(D)),
+            ],
+            ..CsvOptions::default()
+        },
+    )
+    .unwrap();
+    let mut rng = Rng(739);
+    for x in [
+        0.0,
+        -0.0,
+        0.5,
+        1.5,
+        2.5,
+        0.125,
+        -0.125,
+        f64::MIN_POSITIVE,
+        f64::from_bits(1),
+        f64::MAX,
+        9_007_199_254.740_991,
+    ]
+    .into_iter()
+    .chain(
+        (0..1000)
+            .map(|_| f64::from_bits(rng.next()))
+            .filter(|x| x.is_finite()),
+    ) {
+        let y = x as f32;
+        let expected = format!("{x:.d$},{:.d$}\r\n", f64::from(y), d = usize::from(D));
+        let mut out = Vec::new();
+        format
+            .row(&mut out, &[Value::F64(x), Value::F32(y)])
+            .unwrap();
+        assert_eq!(out, expected.as_bytes(), "dynamic precision {D}, {x:e}");
+        out.clear();
+        let mut row = format.begin_row(&mut out);
+        row.fixed::<D>(x);
+        row.fixed_f32::<D>(y);
+        row.finish().unwrap();
+        assert_eq!(out, expected.as_bytes(), "const precision {D}, {x:e}");
+    }
+}
+
+#[test]
+fn every_supported_fixed_precision_matches_binary_value_formatting() {
+    fixed_precision_boundary::<0>();
+    fixed_precision_boundary::<1>();
+    fixed_precision_boundary::<2>();
+    fixed_precision_boundary::<3>();
+    fixed_precision_boundary::<4>();
+    fixed_precision_boundary::<5>();
+    fixed_precision_boundary::<6>();
+    fixed_precision_boundary::<7>();
+    fixed_precision_boundary::<8>();
+    fixed_precision_boundary::<9>();
+    fixed_precision_boundary::<10>();
+    fixed_precision_boundary::<11>();
+    fixed_precision_boundary::<12>();
+    fixed_precision_boundary::<13>();
+    fixed_precision_boundary::<14>();
+    fixed_precision_boundary::<15>();
+    fixed_precision_boundary::<16>();
+    fixed_precision_boundary::<17>();
+}

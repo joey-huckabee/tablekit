@@ -7,6 +7,21 @@ called out under **Format**.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-06
+
+### Release scope and migration
+
+- Release preparation only: `tablekit-csv` advances to 0.7.0. Model/tablekit and Parquet
+  remain 0.6.0; tablekit-profile remains 0.6.1. Parquet `created_by` metadata is unchanged.
+- Add `cell_formats: Vec::new()` or `..CsvOptions::default()` to exhaustive options literals.
+  Update consumer Git pins consistently and regenerate/audit each consumer lockfile.
+- Duplicate format names are rejected even when the first entry is `Default`.
+- Dropping an unfinished row now rolls it back, including during unwind; only `finish()`
+  commits. Existing successful rows are unchanged. Public fast-method checks remain
+  debug-only; use `CsvFormat::row` for always-checked dynamic rows.
+- Quoted built text uses the reusable output buffer instead of a per-cell scratch Vec.
+  Both Git hooks are executable (100755).
+
 ### Added -- cell formats and the row writer (tablekit-csv)
 
 - **`CsvOptions::cell_formats`**: a column can be written as upper- or lower-case

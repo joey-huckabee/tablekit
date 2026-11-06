@@ -243,3 +243,8 @@ Compression (Snappy/none/Gzip/Zstandard), dictionary encoding, data-page bytes a
 batch rows are tablekit-parquet options, shared by sluice convert/load and binary exports.
 They do not alter profile type mappings. Partition directory selection, SQL registration,
 ASCII forms and FATMOPs versions stay in the calling tools. See [PARQUET.md](PARQUET.md).
+
+An unfinished CSV `RowWriter` rolls back on drop (also during unwind); `finish()` commits.
+Quoted `text_with` cells expand backwards within the reusable output buffer, without a
+per-cell scratch allocation once capacity is warm. The fixed-schema fast API retains its
+documented debug-only method checks; dynamic callers use the always-checked `CsvFormat::row`.

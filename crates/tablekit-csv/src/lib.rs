@@ -152,8 +152,8 @@ pub enum CellFormat {
     Fixed(u8),
 }
 
-/// The most decimals [`CellFormat::Fixed`] takes: an `f64` holds at most 17 significant
-/// digits, and `10^17` still fits the integer the common case is formatted through.
+/// The supported decimal-place policy for [`CellFormat::Fixed`]. This is not a bound on
+/// the exact decimal expansion of an `f64`; `10^17` fits the integer fast path.
 pub const MAX_FIXED_DECIMALS: u8 = 17;
 
 /// The choices a user may make; [`CsvOptions::default`] is pandas' `to_csv` on Windows.
@@ -514,19 +514,21 @@ fn resolve_cell_formats(
     cell_formats: &[(String, CellFormat)],
 ) -> Result<Vec<CellFormat>, TableError> {
     let mut formats = vec![CellFormat::Default; schema.len()];
+    let mut assigned = vec![false; schema.len()];
     for (name, format) in cell_formats {
         let Some(i) = schema.iter().position(|f| &f.name == name) else {
             return Err(TableError::Format(format!(
                 "cell format for {name:?}: no such column"
             )));
         };
-        if formats[i] != CellFormat::Default {
+        if assigned[i] {
             return Err(TableError::Format(format!(
                 "cell format for {name:?} given twice"
             )));
         }
         check_cell_format(&schema[i], *format)?;
         formats[i] = *format;
+        assigned[i] = true;
     }
     Ok(formats)
 }
@@ -611,8 +613,10 @@ fn value_type(field: &Field, found: tablekit::DataType) -> TableError {
 ///   so a test that writes one row of each shape proves them all. Where the columns are not
 ///   fixed in the caller's code, use [`CsvFormat::row`], which checks every value.
 ///
-/// A row that is never finished leaves its cells in the output; a caller that abandons one
-/// truncates the buffer to where it was.
+/// Dropping an unfinished row takes back its cells, including during unwinding. Only a
+/// successful [`RowWriter::finish`] commits a row. Deliberately forgetting this guard
+/// bypasses rollback, as it does other Rust destructors.
+#[must_use = "finish the row to commit it; dropping it rolls back its cells"]
 pub struct RowWriter<'f, 'o> {
     format: &'f CsvFormat,
     out: &'o mut Vec<u8>,
@@ -728,10 +732,12 @@ impl RowWriter<'_, '_> {
         let mut builder = TextBuilder {
             out: self.out,
             quote: false,
+            quotes: 0,
         };
         build(&mut builder);
         if builder.quote {
-            quote_in_place(self.out, start);
+            let quotes = builder.quotes;
+            quote_in_place(self.out, start, quotes);
         }
         self.end_cell();
     }
@@ -820,7 +826,7 @@ impl RowWriter<'_, '_> {
     /// [`TableError::ValueType`] for a cell whose method did not suit its column; the row is
     /// taken back.
     #[inline(always)]
-    pub fn finish(self) -> Result<(), TableError> {
+    pub fn finish(mut self) -> Result<(), TableError> {
         let expected = self.format.schema.len();
         if self.col != expected {
             self.out.truncate(self.line_start);
@@ -833,7 +839,15 @@ impl RowWriter<'_, '_> {
         // The separator after the last cell (there is one: no table has no columns).
         self.out.pop();
         self.format.end_row(self.out, self.line_start);
+        self.line_start = self.out.len(); // Drop now retains the completed row.
         Ok(())
+    }
+}
+
+impl Drop for RowWriter<'_, '_> {
+    #[inline]
+    fn drop(&mut self) {
+        self.out.truncate(self.line_start);
     }
 }
 
@@ -865,6 +879,7 @@ row_writer_integers! {
 pub struct TextBuilder<'o> {
     out: &'o mut Vec<u8>,
     quote: bool,
+    quotes: usize,
 }
 
 #[expect(
@@ -916,6 +931,7 @@ impl TextBuilder<'_> {
     pub fn push(&mut self, c: u8) {
         if c.is_ascii() {
             self.quote |= matches!(c, b',' | b'"' | b'\r' | b'\n');
+            self.quotes += usize::from(c == b'"');
             self.out.push(c);
         } else {
             self.out.extend_from_slice("\u{FFFD}".as_bytes());
@@ -926,7 +942,10 @@ impl TextBuilder<'_> {
     // HOT PATH: per value.
     #[inline(always)]
     pub fn push_str(&mut self, s: &str) {
-        self.quote |= needs_quoting(s.as_bytes());
+        for byte in s.bytes() {
+            self.quote |= matches!(byte, b',' | b'"' | b'\r' | b'\n');
+            self.quotes += usize::from(byte == b'"');
+        }
         self.out.extend_from_slice(s.as_bytes());
     }
 }
@@ -1127,17 +1146,25 @@ fn needs_quoting(bytes: &[u8]) -> bool {
 
 /// Quotes the text from `start` to the end of `out` in place: a double quote either side and
 /// each inner one doubled, as [`text`] writes it.
-#[cold]
-fn quote_in_place(out: &mut Vec<u8>, start: usize) {
-    let cell: Vec<u8> = out.split_off(start);
-    out.push(b'"');
-    for b in cell {
-        if b == b'"' {
-            out.push(b'"');
+// HOT PATH: quoted cells are ordinary input. Reuse the output allocation rather than
+// split_off, which allocated a second Vec for every quoted cell. The builder counted
+// quotes while appending, so expanding and escaping takes one backwards pass.
+fn quote_in_place(out: &mut Vec<u8>, start: usize, quotes: usize) {
+    let mut read = out.len();
+    out.resize(read + quotes + 2, 0);
+    let mut write = out.len() - 1;
+    out[write] = b'"';
+    while read > start {
+        read -= 1;
+        let byte = out[read];
+        write -= 1;
+        out[write] = byte;
+        if byte == b'"' {
+            write -= 1;
+            out[write] = byte;
         }
-        out.push(b);
     }
-    out.push(b'"');
+    out[start] = b'"';
 }
 
 /// Writes a table as CSV in one or more batches: the header first, then each batch's rows.
