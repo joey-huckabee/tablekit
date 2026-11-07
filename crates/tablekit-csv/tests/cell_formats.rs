@@ -1044,3 +1044,34 @@ fn boolean_fixed_copy_handles_empty_and_warm_buffers_without_scratch_bytes() {
     .unwrap();
     assert_eq!(out, b"flag\r\n");
 }
+
+/// Text of every length from 0 to 40 -- the short copy's every branch and the long path --
+/// through `text` and `text_with`'s `push_str`, against `CsvFormat::row`.
+#[test]
+fn text_of_every_length_matches_row() {
+    let schema = vec![
+        Field {
+            name: "a".into(),
+            data_type: DataType::Text,
+        },
+        Field {
+            name: "b".into(),
+            data_type: DataType::Text,
+        },
+    ];
+    let mut format = CsvFormat::new(schema, CsvOptions::default()).unwrap();
+    let alphabet = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ";
+    for len in 0..=40 {
+        for s in [&alphabet[..len], &alphabet[alphabet.len() - len..]] {
+            let (mut by_row, mut by_cell) = (Vec::new(), Vec::new());
+            format
+                .row(&mut by_row, &[Value::Text(s), Value::Text(s)])
+                .unwrap();
+            let mut cells = format.begin_row(&mut by_cell);
+            cells.text(s);
+            cells.text_with(|t| t.push_str(s));
+            cells.finish().unwrap();
+            assert_eq!(by_cell, by_row, "length {len}: {s:?}");
+        }
+    }
+}

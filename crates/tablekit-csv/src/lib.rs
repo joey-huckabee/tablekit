@@ -356,6 +356,7 @@ impl CsvFormat {
             out,
             col: 0,
             line_start,
+            na_empty: self.na_empty,
             mismatch: None,
         }
     }
@@ -630,6 +631,9 @@ pub struct RowWriter<'f, 'o> {
     out: &'o mut Vec<u8>,
     col: usize,
     line_start: usize,
+    /// Whether `na_rep` is empty, copied from the format: kept here, a missing cell reads it
+    /// without reloading the format through a pointer the output's writes may alias.
+    na_empty: bool,
     /// Debug builds: the first cell whose method did not suit its column, and the type the
     /// method writes.
     mismatch: Option<(usize, tablekit::DataType)>,
@@ -680,7 +684,7 @@ impl RowWriter<'_, '_> {
     #[inline(always)]
     pub fn missing(&mut self) {
         self.begin_cell(None);
-        if !self.format.na_empty {
+        if !self.na_empty {
             text(self.out, &self.format.options.na_rep);
         }
         self.end_cell();
@@ -703,7 +707,7 @@ impl RowWriter<'_, '_> {
         if needs_quoting(s.as_bytes()) {
             text(self.out, s);
         } else {
-            self.out.extend_from_slice(s.as_bytes());
+            append_short(self.out, s.as_bytes());
         }
         self.end_cell();
     }
@@ -954,7 +958,7 @@ impl TextBuilder<'_> {
             self.quote |= matches!(byte, b',' | b'"' | b'\r' | b'\n');
             self.quotes += usize::from(byte == b'"');
         }
-        self.out.extend_from_slice(s.as_bytes());
+        append_short(self.out, s.as_bytes());
     }
 }
 
@@ -1016,14 +1020,62 @@ fn hex_const<const W: u8>(out: &mut Vec<u8>, v: u64, digits: &[u8; 16]) {
         hex(out, v, W, digits);
         return;
     }
-    let mut buf = [0u8; 16];
-    let cells = &mut buf[..usize::from(W)];
-    let mut rest = v;
-    for slot in cells.iter_mut().rev() {
-        *slot = digits[usize::try_from(rest & 0xF).unwrap_or(0)];
-        rest >>= 4;
+    // Each digit is a table lookup of one nibble; the common widths are written as one array
+    // of that size, so the copy is a fixed-size store, as a hand-written writer does it.
+    let d = |shift: u32| digits[usize::try_from((v >> shift) & 0xF).unwrap_or(0)];
+    match W {
+        2 => out.extend_from_slice(&[d(4), d(0)]),
+        4 => out.extend_from_slice(&[d(12), d(8), d(4), d(0)]),
+        8 => out.extend_from_slice(&[d(28), d(24), d(20), d(16), d(12), d(8), d(4), d(0)]),
+        _ => {
+            let mut buf = [0u8; 16];
+            let cells = &mut buf[..usize::from(W)];
+            let mut rest = v;
+            for slot in cells.iter_mut().rev() {
+                *slot = digits[usize::try_from(rest & 0xF).unwrap_or(0)];
+                rest >>= 4;
+            }
+            out.extend_from_slice(cells);
+        }
     }
-    out.extend_from_slice(cells);
+}
+
+/// Appends `bytes`. Up to 16 bytes -- a label, a code, a short name -- are copied with two
+/// overlapping copies of a fixed size, which compile to a few loads and stores; a copy of a
+/// length known only when running is otherwise a `memcpy` call per cell. Longer text is
+/// copied as usual.
+// HOT PATH: per value.
+#[expect(
+    clippy::inline_always,
+    reason = "a short copy is only cheaper than memcpy when it inlines into the cell"
+)]
+#[inline(always)]
+fn append_short(out: &mut Vec<u8>, bytes: &[u8]) {
+    let len = bytes.len();
+    if len > 16 {
+        out.extend_from_slice(bytes);
+        return;
+    }
+    let start = out.len();
+    out.extend_from_slice(&[0u8; 16]);
+    let cell = &mut out[start..start + 16];
+    match len {
+        0 => {}
+        1 => cell[0] = bytes[0],
+        2..=3 => {
+            cell[..2].copy_from_slice(&bytes[..2]);
+            cell[len - 2..len].copy_from_slice(&bytes[len - 2..]);
+        }
+        4..=7 => {
+            cell[..4].copy_from_slice(&bytes[..4]);
+            cell[len - 4..len].copy_from_slice(&bytes[len - 4..]);
+        }
+        _ => {
+            cell[..8].copy_from_slice(&bytes[..8]);
+            cell[len - 8..len].copy_from_slice(&bytes[len - 8..]);
+        }
+    }
+    out.truncate(start + len);
 }
 
 /// `x` (finite) with exactly `D` decimals, as Rust's and Python's `.{D}f` write it: rounded
