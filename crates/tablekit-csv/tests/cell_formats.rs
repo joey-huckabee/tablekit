@@ -14,7 +14,9 @@
 use std::path::Path;
 
 use tablekit::{Batch, Column, DataType, Field, TableError, Value, Values};
-use tablekit_csv::{CellFormat, CsvFormat, CsvOptions, CsvWriter, RowWriter, write_to};
+use tablekit_csv::{
+    CellFormat, CsvFormat, CsvOptions, CsvWriter, RowWriter, UnguardedRowWriter, write_to,
+};
 
 fn expected() -> Vec<u8> {
     std::fs::read(
@@ -140,7 +142,7 @@ fn row_values(i: usize) -> Vec<Value<'static>> {
     ]
 }
 
-fn write_cells(r: &mut RowWriter<'_, '_>, i: usize) {
+fn write_cells(r: &mut UnguardedRowWriter<'_, '_>, i: usize) {
     match WORD[i] {
         Some(v) => r.hex::<4>(v),
         None => r.missing(),
@@ -334,7 +336,7 @@ fn random_row(rng: &mut Rng) -> Vec<Value<'static>> {
 }
 
 /// Writes `values` (a [`random_row`]) through the row writer's method for each column.
-fn write_by_cell(cells: &mut RowWriter<'_, '_>, values: &[Value<'_>]) {
+fn write_by_cell(cells: &mut UnguardedRowWriter<'_, '_>, values: &[Value<'_>]) {
     for (col, &value) in values.iter().enumerate() {
         match (col, value) {
             (_, Value::Missing) => cells.missing(),
@@ -1073,5 +1075,154 @@ fn text_of_every_length_matches_row() {
             cells.finish().unwrap();
             assert_eq!(by_cell, by_row, "length {len}: {s:?}");
         }
+    }
+}
+
+// ---- The unguarded row writer (CsvFormat::begin_row_unguarded) ----------------------
+
+/// The unguarded writer writes, for finished rows, exactly what the guarded one writes: the
+/// Python-formatted fixture.
+#[test]
+fn unguarded_rows_write_what_python_formats() {
+    let format = CsvFormat::new(batch().schema(), options()).unwrap();
+    let mut out = Vec::new();
+    format.start(&mut out);
+    for i in 0..10 {
+        let mut r = format.begin_row_unguarded(&mut out);
+        write_cells(&mut r, i);
+        r.finish().unwrap();
+    }
+    assert_eq!(
+        String::from_utf8_lossy(&out),
+        String::from_utf8_lossy(&expected())
+    );
+}
+
+/// Every type and format, 20,000 random rows, both `na_rep`s: the unguarded writer, the
+/// guarded one and `CsvFormat::row` write the same bytes.
+#[test]
+fn unguarded_guarded_and_row_write_the_same_bytes() {
+    for na_rep in ["", "NA"] {
+        let options = CsvOptions {
+            na_rep: na_rep.into(),
+            cell_formats: vec![
+                ("hex16".into(), CellFormat::HexUpper(4)),
+                ("hex64".into(), CellFormat::HexLower(16)),
+                ("hex8".into(), CellFormat::HexUpper(1)),
+                ("hex32".into(), CellFormat::HexLower(3)),
+                ("fix6".into(), CellFormat::Fixed(6)),
+                ("fix0".into(), CellFormat::Fixed(0)),
+                ("fix17".into(), CellFormat::Fixed(17)),
+                ("fix2f32".into(), CellFormat::Fixed(2)),
+            ],
+            ..CsvOptions::default()
+        };
+        let mut format = CsvFormat::new(every_column(), options).unwrap();
+        let mut rng = Rng(0x5851_F42D_4C95_7F2D);
+        let (mut by_row, mut guarded, mut unguarded) = (Vec::new(), Vec::new(), Vec::new());
+        for _ in 0..20_000 {
+            let values = random_row(&mut rng);
+            format.row(&mut by_row, &values).unwrap();
+            let mut cells = format.begin_row(&mut guarded);
+            write_by_cell(&mut cells, &values);
+            cells.finish().unwrap();
+            let mut cells = format.begin_row_unguarded(&mut unguarded);
+            write_by_cell(&mut cells, &values);
+            cells.finish().unwrap();
+        }
+        assert_eq!(guarded, by_row, "guarded, na_rep {na_rep:?}");
+        assert_eq!(unguarded, by_row, "unguarded, na_rep {na_rep:?}");
+    }
+}
+
+/// What the unguarded writer documents: an unfinished row -- dropped, or abandoned by a
+/// panic -- leaves its cells, separators included and no line ending; truncating to the
+/// length before the row undoes it; a refused row is still taken back.
+#[test]
+fn unguarded_unfinished_rows_leave_their_cells() {
+    let format = two_columns();
+    let mut out = b"kept\r\n".to_vec();
+
+    let before = out.len();
+    {
+        let mut row = format.begin_row_unguarded(&mut out);
+        row.hex::<4>(1_u16);
+    }
+    assert_eq!(out, b"kept\r\n0001,");
+    out.truncate(before);
+
+    let cancelled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut row = format.begin_row_unguarded(&mut out);
+        row.hex::<4>(2_u16);
+        row.text_with(|text| {
+            text.push_str("half");
+            panic!("synthetic cancellation");
+        });
+    }));
+    assert!(cancelled.is_err());
+    assert_eq!(
+        out, b"kept\r\n0002,half",
+        "the cells written before the panic stay"
+    );
+    out.truncate(before);
+
+    // Refused rows are taken back by the unguarded writer too.
+    let mut row = format.begin_row_unguarded(&mut out);
+    row.hex::<4>(3_u16);
+    assert!(matches!(row.finish(), Err(TableError::RowLength { .. })));
+    let mut row = format.begin_row_unguarded(&mut out);
+    row.hex::<4>(3_u16);
+    row.text("a");
+    row.text("b");
+    assert!(matches!(row.finish(), Err(TableError::RowLength { .. })));
+    assert_eq!(out, b"kept\r\n");
+
+    let mut row = format.begin_row_unguarded(&mut out);
+    row.hex::<4>(4_u16);
+    row.text("ok");
+    row.finish().unwrap();
+    assert_eq!(out, b"kept\r\n0004,ok\r\n");
+}
+
+/// The guarded writer keeps its 0.7.0 behaviour when used through the shared methods: the
+/// same sequence as above leaves nothing behind.
+#[test]
+fn guarded_rows_still_roll_back_what_unguarded_rows_leave() {
+    let format = two_columns();
+    let mut out = b"kept\r\n".to_vec();
+    {
+        let mut row = format.begin_row(&mut out);
+        row.hex::<4>(1_u16);
+    }
+    let cancelled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut row = format.begin_row(&mut out);
+        row.hex::<4>(2_u16);
+        row.text_with(|text| {
+            text.push_str("half");
+            panic!("synthetic cancellation");
+        });
+    }));
+    assert!(cancelled.is_err());
+    assert_eq!(out, b"kept\r\n");
+}
+
+/// A debug build refuses a cell that does not suit its column in the unguarded writer too,
+/// and takes the row back.
+#[test]
+fn debug_builds_check_unguarded_cells() {
+    let format = two_columns();
+    let mut out = Vec::new();
+    let mut row = format.begin_row_unguarded(&mut out);
+    row.u16(1);
+    row.text("a");
+    let result = row.finish();
+    if cfg!(debug_assertions) {
+        assert!(
+            matches!(result, Err(TableError::ValueType { .. })),
+            "{result:?}"
+        );
+        assert_eq!(out, b"");
+    } else {
+        assert!(result.is_ok());
     }
 }

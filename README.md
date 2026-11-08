@@ -68,8 +68,10 @@ write it with `tablekit_csv::write_source_file` or `tablekit_parquet::write_sour
 drive `CsvWriter` and `ParquetWriter` yourself. A tool that writes CSV as it reads each
 record uses `tablekit_csv::CsvFormat`, a row at a time into its own buffer; one whose columns
 are fixed in its code can write each row a cell at a time with `CsvFormat::begin_row`
-(`RowWriter`), at the speed of a writer hand-written for those columns. A column can be
-written in hexadecimal or with fixed decimals (`CsvOptions::cell_formats`,
+(`RowWriter`), at the speed of a writer hand-written for those columns; where the whole
+output is discarded on any error, `CsvFormat::begin_row_unguarded` drops the rollback of an
+unfinished row and its cost ([docs/ROW-WRITER-GUARD.md](docs/ROW-WRITER-GUARD.md)). A column
+can be written in hexadecimal or with fixed decimals (`CsvOptions::cell_formats`,
 [docs/CSV-FORMAT.md](docs/CSV-FORMAT.md#cell-formats)).
 
 Every change that touches the writing path is measured against what it replaces, A against

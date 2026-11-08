@@ -222,6 +222,12 @@ records it ran at 0.97 of the time of that tool's own writer, bytes identical. W
 method suits its column is checked in debug builds; the cell count, and quoting wherever text
 needs it, in every build. `CsvFormat::row` remains the fully checked general way in.
 
+`RowWriter` takes back a row dropped before it is finished, including during unwinding.
+`UnguardedRowWriter` (`CsvFormat::begin_row_unguarded`) is the same writer without that
+guard, for a caller that discards its whole output on any error: on a 2-CPU x86 runner the
+guard cost aero1553's decode 2.5% and its merge 5%. When each is safe, and the measurements,
+are in [ROW-WRITER-GUARD.md](ROW-WRITER-GUARD.md).
+
 ## Decisions
 
 Made with the owner on 2026-10-18.
@@ -245,6 +251,8 @@ They do not alter profile type mappings. Partition directory selection, SQL regi
 ASCII forms and FATMOPs versions stay in the calling tools. See [PARQUET.md](PARQUET.md).
 
 An unfinished CSV `RowWriter` rolls back on drop (also during unwind); `finish()` commits.
+`UnguardedRowWriter` leaves an unfinished row's cells in the output instead
+([ROW-WRITER-GUARD.md](ROW-WRITER-GUARD.md)).
 Quoted `text_with` cells expand backwards within the reusable output buffer, without a
 per-cell scratch allocation once capacity is warm. The fixed-schema fast API retains its
 documented debug-only method checks; dynamic callers use the always-checked `CsvFormat::row`.
