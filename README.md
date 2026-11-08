@@ -1,15 +1,23 @@
 # tablekit
 
-See the [project crate and tool map](docs/PROJECT-MAP.md) for diagrams, ownership,
-overlap with the other repositories, and planned improvements with their prerequisites.
+Tablekit is a Rust library for typed tables and consistent CSV and Parquet output.
+Build named columns with explicit types and missing values, then write a batch, stream
+batches, or format CSV rows into a reusable buffer. CSV defaults follow pandas on Windows;
+Parquet uses explicit, lossless type mappings compatible with the bundled Impala/Hive target.
 
-SQL and Parquet type mappings now share an explicit target profile:
-[`profiles/cloudera-impala-hive-v1.toml`](profiles/cloudera-impala-hive-v1.toml).
-See [docs/PROFILES.md](docs/PROFILES.md) for loading the same profile in both generators.
+Use it for reporting and spreadsheet exports, converting records into columnar files, or
+sharing one output contract across multiple applications. Input parsing and interpretation
+stay in your application; the table model has no external dependencies.
 
-Writes tables to CSV and Parquet in one format, for every FATMOPs tool. A tool builds a table
-from its own records; tablekit writes it. So every CSV looks like what pandas writes, every
-Parquet file has the types Impala reads, and no tool's output drifts from another's.
+- **Batch exports:** construct a `Batch` and use the file or buffer helpers.
+- **Streaming tables:** implement `Source` to supply batches without holding a whole table.
+- **Fixed-schema CSV:** write cells directly with guarded or explicitly unguarded row writers.
+  Fast cell methods validate type/format agreement in debug builds only; use `CsvFormat::row`
+  for fully checked dynamic rows.
+
+See the [crate and integration map](docs/PROJECT-MAP.md) for boundaries and planned work.
+[Target profiles](docs/PROFILES.md) document the bundled SQL/Parquet mappings and their
+current compatibility restrictions.
 
 | Crate | What it does |
 |---|---|
@@ -27,12 +35,14 @@ Parquet file has the types Impala reads, and no tool's output drifts from anothe
 | [AGENTS.md](AGENTS.md) | The rules for working in this repository |
 | `cargo doc --open` | The API, with runnable examples |
 
-## 0.7.0 version scope
+## Crate versions and compatibility
 
-Only `tablekit-csv` advances to 0.7.0; model/tablekit and Parquet remain 0.6.0 and
-`tablekit-profile` remains 0.6.1, preserving Parquet writer metadata. Exhaustive `CsvOptions`
-literals need `cell_formats` or `..CsvOptions::default()`. See
-[release validation and downstream migration](docs/CSV-070-VALIDATION.md).
+The current workspace uses `tablekit-csv` 0.7.1, model/tablekit and Parquet 0.6.0, and
+`tablekit-profile` 0.6.1. Independent crate versioning preserves the Parquet writer's metadata
+when only CSV changes. Since CSV 0.7.0, exhaustive `CsvOptions` literals need `cell_formats`
+or `..CsvOptions::default()`. See [CHANGELOG.md](CHANGELOG.md),
+[CSV 0.7.0 validation](docs/CSV-070-VALIDATION.md) and
+[guarded/unguarded rows](docs/ROW-WRITER-GUARD.md).
 
 ## Use
 
@@ -45,9 +55,9 @@ tablekit-csv = { git = "https://github.com/joey-huckabee/tablekit", rev = "COMMI
 tablekit-parquet = { git = "https://github.com/joey-huckabee/tablekit", rev = "COMMIT" }
 ```
 
-The repository is private: the build fetches it through `git`, so put
-`[net] git-fetch-with-cli = true` in a `.cargo/config.toml` at the root of the repository
-that depends on it.
+Replace `COMMIT` with a reviewed repository revision. Use the same revision for multiple
+tablekit crates so their shared Rust types are compatible. An application must maintain and
+audit its own lockfile; a dependency repository's Cargo.lock does not constrain it.
 
 ```rust
 use tablekit::{Batch, Column, Values};
@@ -68,8 +78,8 @@ write it with `tablekit_csv::write_source_file` or `tablekit_parquet::write_sour
 drive `CsvWriter` and `ParquetWriter` yourself. A tool that writes CSV as it reads each
 record uses `tablekit_csv::CsvFormat`, a row at a time into its own buffer; one whose columns
 are fixed in its code can write each row a cell at a time with `CsvFormat::begin_row`
-(`RowWriter`), at the speed of a writer hand-written for those columns; where the whole
-output is discarded on any error, `CsvFormat::begin_row_unguarded` drops the rollback of an
+(`RowWriter`), avoiding an intermediate `Value` array; where the whole output is discarded
+on any error, `CsvFormat::begin_row_unguarded` drops the rollback of an
 unfinished row and its cost ([docs/ROW-WRITER-GUARD.md](docs/ROW-WRITER-GUARD.md)). A column
 can be written in hexadecimal or with fixed decimals (`CsvOptions::cell_formats`,
 [docs/CSV-FORMAT.md](docs/CSV-FORMAT.md#cell-formats)).

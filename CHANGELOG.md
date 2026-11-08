@@ -5,6 +5,11 @@ All notable changes to this repository are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). A change to what is written is
 called out under **Format**.
 
+Historical application benchmarks retain their measured input sizes, timings, instruction
+counts and platform caveats. Application-specific harnesses and recordings are not bundled;
+those results are not promises for every caller. Reproducible synthetic writer benchmarks
+are recorded separately where available.
+
 ## [Unreleased]
 
 ## [0.7.1] - 2026-11-08
@@ -15,8 +20,8 @@ called out under **Format**.
   rollback guard. An unfinished row -- dropped, or abandoned by a panic -- leaves its cells in
   the output; finished and refused rows behave exactly as with `RowWriter`. For a caller that
   discards its whole output on any error, where the guard's cost matters: on a 2-CPU x86
-  runner it cost aero1553's whole decode 2.5% and its merge 5%. `RowWriter` is unchanged and
-  stays the default; it is now `UnguardedRowWriter` plus the guard, its cell methods reached
+  runner a historical application pipeline paid 2.5% in decoding and 5% in merging.
+  `RowWriter` is unchanged and stays the default; it is now `UnguardedRowWriter` plus the guard, its cell methods reached
   through `Deref`, so existing code compiles unchanged. When each is safe, the measurements
   and the tests: [docs/ROW-WRITER-GUARD.md](docs/ROW-WRITER-GUARD.md).
 
@@ -25,10 +30,11 @@ called out under **Format**.
 - Faster row-writer cells, same bytes: `hex::<2|4|8>` writes one fixed-size array; a row
   keeps whether `na_rep` is empty instead of reloading the format for every missing cell; text
   up to 16 bytes is copied with two overlapping fixed-size copies instead of a `memcpy` call.
-  On the 2-CPU x86 runner aero1553's decode went from 1.065 to 1.043 of its own writer's time
-  with `RowWriter`, and to 1.014-1.016 (merge 1.005-1.006) with `UnguardedRowWriter`. A new test checks text of every length 0-40 against `CsvFormat::row`.
+  On the 2-CPU x86 runner the historical application decode went from 1.065 to 1.043 of its
+  custom writer's time with `RowWriter`, and to 1.014-1.016 (merge 1.005-1.006) with
+  `UnguardedRowWriter`. A new test checks text of every length 0-40 against `CsvFormat::row`.
 - The existing APIs are untouched: `examples/perf_existing.rs` under callgrind (200,000 rows)
-  runs the same instructions as 0.7.0 to within ten (row 348,324,215 against 348,324,205;
+  differs from 0.7.0 by only a few dozen instructions in this benchmark (row 348,324,215 against 348,324,205;
   batch 346,473,892 against 346,473,869; writer 346,473,897 against 346,473,887).
 
 ### Release scope
@@ -67,11 +73,12 @@ called out under **Format**.
   random rows of every type and format, both `na_rep`s), quotes text wherever it needs it,
   and refuses a row with the wrong number of cells, in every build; whether each method
   suits its column is checked in debug builds.
-- Historical author-head measurement, not rerun for this candidate: on x86 (GitHub-hosted AMD EPYC runner) on aero1553's 21 MB golden 1553 recording
+- Historical author-head measurement, not rerun for this candidate: on x86 (GitHub-hosted
+  AMD EPYC runner) on a 21 MB protocol-record benchmark input
   (460,575 records, 46 columns: a timestamp built from numbers, 32 hex words, a six-decimal
   interval), rendering only, one thread, best of 15 interleaved rounds, three runs:
-  aero1553's own hand-written writer 158 ns per record, `RowWriter` 154 ns (0.98x), the bytes
-  identical. Built into aero1553 in place of its writer, a whole decode ran at 1.018x with
+  the application's custom writer 158 ns per record, `RowWriter` 154 ns (0.98x), the bytes
+  identical. Integrated into the same application in place of its writer, a whole decode ran at 1.018x with
   `--threads 0`, 0.987x with one rendering thread and 0.983x with two (the default), the
   output identical. Getting there took three changes, each measured: every per-cell method
   inlined into the caller's row (`inline(always)`, with the lint's reason), the quoting check
@@ -91,7 +98,7 @@ called out under **Format**.
   19.721945/18.439129, writer 19.766827/18.475552. All bytes match. Whole-process Callgrind
   instructions for row increase 1.12% (344,477,827/348,326,895); batch/writer decrease about
   5.35% (366,047,760/346,476,592 and 366,047,767/346,476,598). The instruction cost is
-  accepted by the coordinator with neutral row wall time and improvements in the other
+  retained with neutral row wall time and improvements in the other
   paths; not every metric improves.
 - Final Windows x86 remeasurement at source `7960a9fa9defee05704cc807cdfa854659633adb`
   passed: median baseline/final ms batch 40.5565/34.1207, writer 40.6024/34.1858, row
@@ -112,14 +119,14 @@ called out under **Format**.
   writes after warm-up gave median 39.750/39.532 ms before/after without dictionaries and
   37.740/37.740 ms with dictionaries. See [comparison scope and limits](docs/CI.md#zstandard-output-compatibility).
 - Consumers must update their own lockfiles: tablekit's lockfile is not used when resolving
-  it as a Git/path dependency. See [the audited consumer snapshots and update steps](docs/CI.md#zstandard-security-update-and-consumer-lockfiles).
+  it as a Git/path dependency. See [application lockfile update guidance](docs/CI.md#zstandard-security-update-and-consumer-lockfiles).
 
 ### Added
 
 - GitHub Actions checks stable Linux/Windows and Rust 1.85 Linux, including formatting,
   warning-free Clippy/docs and locked tests/doctests. A separate scheduled dependency audit
-  checks RustSec advisories and source provenance. The owner-approved CI policy replaces
-  the earlier no-CI rule; action SHAs, permissions and scope are documented in docs/CI.md.
+  checks RustSec advisories and source provenance. Action SHAs, permissions and scope
+  are documented in docs/CI.md.
 
 ### Documentation
 
@@ -135,7 +142,7 @@ called out under **Format**.
 - `tablekit-profile::render_into`: append template substitutions into caller-owned capacity.
   Existing `render`, substitution rules, first-key selection and error text are preserved.
   Frozen-parser regression tests cover errors, Unicode, inserted literal braces and reuse.
-- CMM-Code-Generator's synthetic wide SQL prototype removes 130944 generation allocation
+- A synthetic wide-schema SQL-generation prototype removes 130944 generation allocation
   events and 3274880 cumulative requested bytes versus its owned-comment implementation.
   Caller measurements and peak-memory limits belong in its SQL comment-buffer report.
 
@@ -176,8 +183,8 @@ called out under **Format**.
 - Local A/B validation against the previous writer: 500,000 synthetic rows in six columns,
   Snappy and dictionaries enabled, 16 measured encodes per version after warm-up. Median
   wall time was 0.2104 s before and 0.2062 s with profiles; the 9,606,127-byte files were
-  identical. This shows no measured regression, not a claim of a speedup. Callgrind could
-  not run because WSL access was denied on the validation host.
+  identical. This shows no measured regression, not a claim of a speedup. Callgrind instruction counts
+  were not collected on that validation host.
 
 ## [0.4.2] - 2026-10-19
 
@@ -185,8 +192,8 @@ called out under **Format**.
 
 - `CsvWriter::write` formats rows in a function of its own (`fill`), kept out of line, with
   the buffer moved out of the writer while it runs. Before, the loop was inlined into each
-  caller and compiled worse where the writer was not a local variable: FATMOPs-Binary's
-  batched export, which keeps its writer in a closure, ran 3% more instructions writing a
+  caller and compiled worse where the writer was not a local variable: a batched exporter
+  that keeps its writer in a closure ran 3% more instructions writing a
   million rows than when the writer was local. Now it is the same, and the writer itself runs
   fewer: 51.80 G against 53.31 G instructions (callgrind) for the row and batch benchmark
   of 738,433 dump rows, 2.8% fewer. The bytes written are unchanged (every expected-file
@@ -198,8 +205,7 @@ called out under **Format**.
 
 - `Text::from_parts(buffer, ends)`: a text column from text already in one buffer, without
   copying it, checked (`None` if an end goes backward, past the buffer, or into a
-  character). FATMOPs-Binary hands `cmm-decode`'s decoded text columns to its exports this
-  way.
+  character). Applications can use it to transfer existing packed text columns into a batch.
 
 ## [0.4.0] - 2026-10-18
 
@@ -232,10 +238,11 @@ Includes what was prepared as 0.3.2 (never released): zmij and faster rows, belo
   column's type instead of two through `Value`.
 - A row is checked and written in one pass (a refused row is still taken back whole), its
   room is reserved once, and a float zmij already writes in
-  NumPy's layout (the common case: `0.000921`, `123.0`) is copied as it is. With sluice
-  writing rows a megabyte at a time, `sluice dump --format csv --hex 8` of a 738,433-record
-  capture takes 0.473 s (best of nine), against 0.594 s with zmij alone and 0.633 s for
-  sluice's hand-written CSV before tablekit.
+  NumPy's layout (the common case: `0.000921`, `123.0`) is copied as it is. With a historical
+  streaming exporter writing rows a megabyte at a time, a 738,433-record input (original
+  harness setting `--hex 8`) takes 0.473 s
+  (best of nine), against 0.594 s with zmij alone and 0.633 s for the exporter's custom CSV
+  before tablekit.
 
 ### Measured against 0.3.0
 
@@ -243,13 +250,13 @@ Includes what was prepared as 0.3.2 (never released): zmij and faster rows, belo
   enum text, missing values) is written in 84.5 ms against 415 ms (best of 15, three
   alternating rounds), with 0.69 against 2.90 billion instructions (callgrind). The output is
   byte-identical.
-- **sluice `dump --format csv --hex 8`** (738,433 records): a median of 0.474 s against
-  0.629 s for sluice's own CSV before tablekit; 134.6 against 243.2 million instructions on
-  a 40 MiB capture.
+- **Historical streaming export** (738,433 records; original harness setting `--hex 8`): a median of 0.474 s against
+  0.629 s for the application's custom CSV before tablekit; 134.6 against 243.2 million
+  instructions on a 40 MiB capture.
 
 ### Format
 
-- Unchanged: the NumPy corpus, the pandas expected files, and a 738,433-record sluice dump
+- Unchanged: the NumPy corpus, the pandas expected files, and a 738,433-record streaming export
   are byte-identical to 0.3.1's. `created_by` is `tablekit 0.4.0`.
 
 ## [0.3.1] - 2026-10-18
@@ -257,8 +264,8 @@ Includes what was prepared as 0.3.2 (never released): zmij and faster rows, belo
 ### Changed
 
 - CSV numbers are formatted by `ryu` (floats) and `itoa` (integers) on the stack, instead of
-  through Rust's formatting machinery: a sluice dump row is formatted about as fast as
-  sluice's own hand-written CSV was (0.640 s against 0.648 s for a 738,433-record capture,
+  through Rust's formatting machinery: a historical streaming-export row is formatted about
+  as fast as its custom CSV writer was (0.640 s against 0.648 s for a 738,433-record capture,
   best of seven), where 0.3.0 took about half as long again. Ryu also takes the even digit
   when two shortest forms are equally close, as NumPy does, so 0.3.0's second formatting
   pass for that case is gone.

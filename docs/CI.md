@@ -1,8 +1,8 @@
 # Rust checks
 
-The owner approved GitHub Actions for this private repository, replacing the earlier
-local-only testing rule. Local checks still run before pushing. CI uses the checked-in
-synthetic fixtures; it never fetches reference repositories or production data.
+GitHub Actions validates the Rust workspace and its dependency policy. Run relevant checks
+locally before pushing. CI uses checked-in synthetic fixtures and needs no external
+application data or configured credentials.
 
 ## Coverage
 
@@ -65,8 +65,8 @@ The workspace lockfile selects `zstd 0.13.4` and `zstd-safe 7.4.0`, fixing
 compatible fixed versions. All thirteen entries were checked against RustSec database
 commit `965bf9ad083b58e6340d65829d85217b18be9290`; no advisory is ignored.
 
-Only those two packages and checksums change. Parquet stays exactly 59.3.0; `zstd-sys`
-stays 2.1.2+zstd.1.5.7 and the enabled features stay the same. Both updated wrappers declare
+That security update changed only those two packages and checksums. Parquet remained exactly
+59.3.0; `zstd-sys` remained 2.1.2+zstd.1.5.7 and the enabled features stayed the same. Both updated wrappers declare
 Rust 1.64 support; the workspace still requires and tests Rust 1.85. `zstd 0.13.4` requires
 `zstd-safe >=7.4.0, <8`, so updating the former also raises the latter's minimum.
 
@@ -81,16 +81,8 @@ An isolated Rust 1.85 path-consumer resolution reproduced this: with the updated
 checkout and an old consumer lockfile, Cargo retained 0.13.3/7.3.0. The targeted update
 below changed just those wrappers to 0.13.4/7.4.0 in that consumer as well.
 
-Read-only consumer snapshots inspected on 2026-11-05:
-
-| Repository main commit | Lockfiles containing zstd 0.13.3 / zstd-safe 7.3.0 |
-|---|---|
-| FATMOPs-Binary `9dde0cb691e6b36813407eece76ea1c01fec101d` | `rust/Cargo.lock`, `rust/bakeoff/Cargo.lock`, `rust/fuzz/Cargo.lock` |
-| sluice `ddad0f29f77e77b6aa1a1eb0c051442f19869a1f` | `Cargo.lock`, `fuzz/Cargo.lock` |
-| CMM-Code-Generator `6a449d52e3c86b5947e3007dee720e50e790b611` | `Cargo.lock` |
-
-Each listed lockfile needs its own reviewed update, tests and audit from the corresponding
-workspace directory. With the inspected dependency graph, the minimal command is:
+Applications with their own lockfiles must review each independent workspace, including
+separate tooling or fuzz workspaces. For the affected versions, the targeted update is:
 
 ```bash
 cargo +1.85.0 update -p zstd --precise 0.13.4
@@ -98,18 +90,16 @@ cargo +1.85.0 tree --locked -i zstd-safe
 cargo deny --locked --workspace check advisories sources
 ```
 
-Confirm zstd-safe resolves to 7.4.0 or a compatible fixed patch. Independent fuzz/bakeoff
-workspaces may require their own toolchain and audit policy; use that repository's rules.
-The inspected CMM fuzz and synthetic-tool lockfiles do not contain these codecs. These are
-snapshot findings, not claims that downstream main stays unchanged. This PR changes none of
-those repositories. The codec fix can be applied to their existing tablekit pins; when
-adopting this PR's tablekit revision, keep all tablekit crate pins consistent and refresh
-the consumer locks explicitly. A pin update alone does not carry this lockfile fix.
+Confirm zstd-safe resolves to 7.4.0 or a compatible fixed patch. Use the application's own
+toolchain, audit configuration and tests. Updating a tablekit Git revision alone does not
+carry the library repository's lockfile fix; keep crate revisions consistent and refresh the
+application lock explicitly. These are historical remediation versions, not a substitute for
+checking current advisories.
 
 ### Zstandard output compatibility
 
 Compared the pre-update lockfile at `45bd7a098cf84bcbf34ff61a99c8ebe9f5e97065` with the
-two-package update on the same Linux ARM64 host and stable Rust 1.99.1. A scratch Rust
+two-package update on the same Linux ARM64 host and stable Rust 1.99.1. A standalone Rust
 harness wrote 131,072 synthetic rows in six columns: nullable booleans, signed/unsigned
 integer boundaries, float boundaries and negative zero, nullable repeated Unicode/quoted
 text and a varied integer sequence. It used 4096-byte data pages and 127-row encoder batches,
@@ -152,12 +142,6 @@ without an additional checksum verification in the action; the full action SHA d
 make registry metadata, package mirrors or hosted runner images immutable. Review action
 source and release notes before updating either pin. Rust is installed using the hosted
 runner's `rustup`, without an extra toolchain action.
-
-Reference inspection: `joey-huckabee/aero1553` at
-`0dcb3e83da9d547bbf5ec5df7676f7dfed34d8db`, read-only. Its Linux/Windows Rust checks,
-separate MSRV, docs and supply-chain checks informed this setup. Its publishing, binary
-packaging, coverage, Python, performance and SonarCloud configuration are not part of
-tablekit's CI. No dependency on that repository or its moving checkout was added.
 
 Official references used to review the configuration:
 

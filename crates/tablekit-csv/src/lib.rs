@@ -653,8 +653,9 @@ fn value_type(field: &Field, found: tablekit::DataType) -> TableError {
 /// That is the whole difference, and it is why this type exists: a guard that runs on drop
 /// needs the compiler to keep a clean-up path on every call that may unwind, and in a row of
 /// dozens of inlined cells that path costs time even when nothing panics. Measured on x86
-/// (2 CPUs) for aero1553's 46-column CSV, the whole decode ran 2.5% slower, and a merge 5%
-/// slower, with the guard than without it (`docs/ROW-WRITER-GUARD.md`).
+/// (2 CPUs) in a historical 46-column application exporter, whole-input decode ran 2.5%
+/// slower, and a merge 5% slower, with the guard than without it
+/// (`docs/ROW-WRITER-GUARD.md`).
 ///
 /// Use it only when an incomplete line can never reach a reader: the output is a temporary
 /// file renamed into place only on success, or a buffer that is thrown away on any error and
@@ -701,7 +702,7 @@ pub struct UnguardedRowWriter<'f, 'o> {
 
 #[expect(
     clippy::inline_always,
-    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+    reason = "the row writer needs cells inlined into the caller: without this, a historical 46-column application benchmark ran 1.20x its custom writer"
 )]
 impl UnguardedRowWriter<'_, '_> {
     /// Counts a cell; in debug builds, checks the method that writes it (`ty`, `format`)
@@ -1008,7 +1009,7 @@ pub struct TextBuilder<'o> {
 
 #[expect(
     clippy::inline_always,
-    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+    reason = "the row writer needs cells inlined into the caller: without this, a historical 46-column application benchmark ran 1.20x its custom writer"
 )]
 impl TextBuilder<'_> {
     /// Appends `n` in decimal, zero-padded to at least `width` digits.
@@ -1123,7 +1124,7 @@ fn hex(out: &mut Vec<u8>, v: u64, width: u8, digits: &[u8; 16]) {
 // HOT PATH: per value.
 #[expect(
     clippy::inline_always,
-    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+    reason = "the row writer needs cells inlined into the caller: without this, a historical 46-column application benchmark ran 1.20x its custom writer"
 )]
 #[inline(always)]
 fn hex_const<const W: u8>(out: &mut Vec<u8>, v: u64, digits: &[u8; 16]) {
@@ -1199,7 +1200,7 @@ fn append_short(out: &mut Vec<u8>, bytes: &[u8]) {
 // HOT PATH: per value.
 #[expect(
     clippy::inline_always,
-    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+    reason = "the row writer needs cells inlined into the caller: without this, a historical 46-column application benchmark ran 1.20x its custom writer"
 )]
 #[inline(always)]
 fn fixed<const D: u8>(out: &mut Vec<u8>, x: f64) {
@@ -1306,7 +1307,7 @@ fn write_bool(out: &mut Vec<u8>, b: bool) {
 // HOT PATH: per value.
 #[expect(
     clippy::inline_always,
-    reason = "the row writer is fast only when every cell inlines into the caller's row: measured in aero1553, where without it a 46-column row ran 1.20x its hand-written writer"
+    reason = "the row writer needs cells inlined into the caller: without this, a historical 46-column application benchmark ran 1.20x its custom writer"
 )]
 #[inline(always)]
 fn needs_quoting(bytes: &[u8]) -> bool {

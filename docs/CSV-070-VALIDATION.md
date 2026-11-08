@@ -1,10 +1,11 @@
 # CSV 0.7.0 validation evidence
 
-Evidence recorded on 2026-11-06 at source `7960a9fa9defee05704cc807cdfa854659633adb`,
-merged unchanged in `325ca295c744ab843a7a8cd271a750001e179c2a`. These results do not claim
-that a v0.7.0 tag already exists; the coordinator owns tagging and the GitHub release after
-this documentation update. Only tablekit-csv advances to 0.7.0; tablekit and Parquet stay
-0.6.0, profile stays 0.6.1, and Parquet writer metadata stays `tablekit 0.6.0`.
+Historical validation recorded on 2026-11-06 for CSV 0.7.0 at source
+`7960a9fa9defee05704cc807cdfa854659633adb`, integrated unchanged in
+`325ca295c744ab843a7a8cd271a750001e179c2a`. Only the CSV crate advanced in that release;
+tablekit and Parquet stayed 0.6.0, profile stayed 0.6.1, and Parquet writer metadata stayed
+`tablekit 0.6.0`. These measurements do not cover every input, later release or toolchain;
+see [CHANGELOG.md](../CHANGELOG.md) for subsequent changes.
 
 ## Reviewed behavior
 
@@ -56,7 +57,7 @@ trials, one unmeasured warm-up and one measured render per process. Medians:
 
 Row wall time is roughly neutral/slightly better; **row instructions increase 1.12%**.
 Batch/writer wall times improve about 6.5%, and instructions fall about 5.35%. This is a
-trade-off accepted by the coordinator with neutral row wall time and improvements in the
+trade-off retained in that release with neutral row wall time and improvements in the
 other paths, not a claim that every metric improves or that arbitrary inputs cannot regress.
 It supersedes the earlier author-head ARM/x86 instruction figures for this probe.
 Valgrind 3.19 Callgrind Ir here is **whole process**, including deterministic input setup,
@@ -82,7 +83,7 @@ capacity/pointer checks and byte tests independently cover in-place expansion an
 
 ## Final Windows x86 measurements
 
-The coordinator remeasured exact source `7960a9fa9defee05704cc807cdfa854659633adb` on
+The final Windows measurement used exact source `7960a9fa9defee05704cc807cdfa854659633adb` on
 Windows x86 MSVC, Rust 1.99.0, release fat LTO, one codegen unit and debug info level 1.
 Baseline was c26e090; its CSV/model sources and manifests were verified identical to merged
 main 77cb72f. Input was the same 200,000 invented rows used above. Nine alternating ABBA
@@ -96,12 +97,12 @@ trial pairs, five warmed timed rounds per trial, median of trial medians:
 
 Every paired trial was faster in all three modes. Each output was 12,105,974 bytes with
 SHA-256 `2011c6d46ba25b78af522a865e7f9f323a5abba69826e0af34b3e4d5b4f28a42`.
-The final Windows performance check passed. The coordinator accepted the disclosed ARM row
-instruction cost; no performance review gate remains unresolved.
+The final Windows performance check passed. The release retained the disclosed ARM row
+instruction cost alongside neutral row wall time and improvements in the other paths.
 
 ### Historical preliminary measurements
 
-Earlier coordinator-provided Windows x86 / Rust 1.99.0 measurements used seven
+Earlier Windows x86 / Rust 1.99.0 measurements used seven
 randomized-order trials with five warmed rounds each at 200,000 rows, comparing a scratch
 five-byte body on ac355ae to baseline. Median ms, main/scratch: batch 40.6591/38.7886,
 writer 40.6600/39.2757, row 39.4814/37.7606. All bytes and the hash matched. These preliminary
@@ -119,8 +120,8 @@ All four hosted checks passed at the same source:
 - [Rust stable Linux, stable Windows and Rust 1.85 Linux](https://github.com/joey-huckabee/tablekit/actions/runs/42230817850).
 - [RustSec advisories and dependency sources](https://github.com/joey-huckabee/tablekit/actions/runs/42230817899).
 
-This documentation-only completion records existing validation; it does not represent a new
-runtime build, test run or release tag.
+These results apply to the recorded source revision. Rerun relevant checks for later code,
+toolchains and target platforms rather than treating historical counts as current coverage.
 
 ## Reproduction commands
 
@@ -161,13 +162,13 @@ Get-FileHash C:\Temp\base.csv -Algorithm SHA256
 Get-FileHash C:\Temp\candidate.csv -Algorithm SHA256
 ```
 
-Use the same compiler channel/version on both sides; 1.99.0 reproduces the coordinator's
-Windows baseline. Run all three modes and interleave order; do not judge a single best run.
+Use the same compiler channel/version on both sides; 1.99.0 reproduces the recorded
+Windows measurements. Run all three modes and interleave order; do not judge a single best run.
 
 ## Independent Parquet readback
 
 The existing `tablekit-parquet` sample example wrote its invented all-types three-row
-fixture. A separate cloud-only PyArrow 26.0.1 environment read it and checked all 13 column
+fixture. A separate isolated PyArrow 26.0.1 environment read it and checked all 13 column
 names and physical/logical Arrow types (including signed widening for unsigned columns and
 DECIMAL(20,0) for u64), every value, nulls, signed zero and Unicode/quoted text. All assertions
 passed, including `created_by == "tablekit 0.6.0"`. No Python runtime/project dependency was
@@ -176,14 +177,17 @@ and reading DIR/sample.parquet with `pyarrow.parquet.read_table`; compare with t
 invented values and docs/PARQUET.md. Existing Rust codec round trips cover every enabled
 compression option in the final suite.
 
-## Downstream migration
+## Application migration
 
-Update consistent tablekit Git revisions in each consumer workspace and its separate native,
-fuzz, bakeoff and tool workspaces. Add `cell_formats: Vec::new()` or the default update syntax
-to exhaustive CsvOptions literals. Known sites at review time: FATMOPs-Binary
-`rust/crates/fatmops-py/src/lib.rs`; sluice `python/native/src/lib.rs` and
-`sluice/tests/summary.rs`. CMM's inspected handwritten sources had no CsvOptions literal.
-Regenerate each consumer lockfile, verify the CSV crate alone is 0.7.0, audit zstd >=0.13.4 /
-zstd-safe >=7.4.0, and run that repository's debug/release tests, docs and MSRV/native build
-checks using synthetic inputs. A new tablekit pin does not import this repository's lockfile.
-No downstream repository was changed by this worker.
+Use consistent tablekit Git revisions in an application and its independently locked tool,
+native-binding or fuzz workspaces. Add `cell_formats: Vec::new()` or the default update
+syntax to exhaustive `CsvOptions` literals. Record the versions selected for each crate;
+CSV, model, Parquet and profile versions can advance independently.
+
+Refresh and audit each application's lockfile, including the Zstandard wrappers when the
+Parquet writer is used. The historical security update selected zstd 0.13.4 and zstd-safe
+7.4.0; consult current advisories and [CI.md](CI.md#zstandard-security-update-and-consumer-lockfiles)
+rather than treating those versions as a permanent security guarantee. A new tablekit Git
+revision does not import this repository's lockfile. Run application tests in debug and release, docs and MSRV checks, plus any language
+binding checks, using representative synthetic inputs. For the profile's current limits,
+see [PROFILES.md](PROFILES.md); target type support is not an arbitrary-schema SQL service.

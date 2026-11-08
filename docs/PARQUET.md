@@ -4,15 +4,17 @@ The explicit type mapping is supplied by `profiles/cloudera-impala-hive-v1.toml`
 with the SQL generator through tablekit-profile. The bundled profile preserves the contract
 below. See [PROFILES.md](PROFILES.md) for validation, custom profiles and supported coercions.
 
-What `tablekit-parquet` writes: a Parquet file Impala reads into the tables `cmm-gen
-generate --lang impala` makes (CMM-Code-Generator, `docs/IMPALA.md`), and any other Parquet
-reader (pyarrow, pandas, DuckDB, Spark) reads as well.
+`tablekit-parquet` writes Parquet with explicit physical/logical types and nullability.
+The bundled mappings target Impala/Hive compatibility. Applications should verify their
+reader and database versions; the mappings are not certification for every deployment.
+Independent validation uses PyArrow; other Parquet readers must support the encodings and
+logical annotations selected in the file.
 
 ## Types
 
 Impala has no unsigned integers, so each unsigned type is written as the next wider signed
-one. This is the same widening `cmm-gen`'s tables use, so a column's file type and table type
-agree.
+one. A SQL generator using the same profile can declare the corresponding SQL type rather
+than independently choosing a different widening.
 
 | tablekit | Parquet physical type | Parquet logical type | Impala |
 |---|---|---|---|
@@ -64,8 +66,8 @@ Impala matches a file's columns to a table's by position by default
 (`PARQUET_FALLBACK_SCHEMA_RESOLUTION=position`), and by name if that is set to `name`. So a
 file meant for an Impala table should hold that table's columns, in its order, under its
 names. tablekit doesn't know any table; the tool that builds the batch chooses names and
-order. FATMOPs-Binary's `export_parquet` uses `cmm-gen`'s: `record_time`, then each field as
-a lowercase identifier.
+order. A caller that emits SQL should use the same column names/order and identifier policy
+as its Parquet schema. Tablekit does not rename application columns to match external DDL.
 
 ## Writer controls
 
@@ -78,7 +80,7 @@ crate. Defaults retain the previous writer settings and schema/value contract.
 The validated workspace lockfile uses zstd 0.13.4 and zstd-safe 7.4.0 for the 2026 Zstandard
 security fixes, with Parquet and the native codec unchanged. Consumers must update their own
 lockfiles; pinning tablekit alone does not constrain these transitive versions. See
-[the dependency policy and downstream follow-ups](CI.md#zstandard-security-update-and-consumer-lockfiles).
+[the dependency policy and application lockfile guidance](CI.md#zstandard-security-update-and-consumer-lockfiles).
 
 Page size is approximate: the encoder checks boundaries between internal batches, and
 an individual value can exceed the limit. Encoder batches are not row groups. Each call
