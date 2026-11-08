@@ -29,7 +29,7 @@
 //! | [`write_source_file`], [`write_source`] | a [`tablekit::Source`], a batch at a time | a table of any size, one batch in memory |
 //! | [`CsvWriter`] | a table in several batches (a [`tablekit::BatchWriter`]) | driving the batches yourself |
 //! | [`CsvFormat`] | a row at a time, as borrowed [`Value`]s, into the caller's buffer | a tool that writes each record as it reads it, allocating nothing per row |
-//! | [`RowWriter`] ([`CsvFormat::begin_row`], [`CsvWriter::write_row_with`]) | a row a cell at a time, typed by the method called; an unfinished row is taken back | a tool whose columns are fixed in its code, at the speed of a hand-written writer |
+//! | [`RowWriter`] ([`CsvFormat::begin_row`], [`CsvWriter::write_row_with`]) | a row a cell at a time, typed by the method called; an unfinished row is taken back | fixed-schema caller code that avoids an intermediate `Value` array |
 //! | [`UnguardedRowWriter`] ([`CsvFormat::begin_row_unguarded`]) | the same, without taking back an unfinished row | such a tool that discards its whole output on any error, where the guard's cost is measured to matter |
 //!
 //! A column can be given a [`CellFormat`] other than pandas' default -- hexadecimal for
@@ -923,8 +923,8 @@ impl UnguardedRowWriter<'_, '_> {
 }
 
 /// One row, written a cell at a time straight into the output, and taken back if it is not
-/// finished: for a tool whose columns are fixed in its code, at the speed of a hand-written
-/// writer. Start one with [`CsvFormat::begin_row`] or [`CsvWriter::write_row_with`].
+/// finished: for fixed-schema caller code that avoids an intermediate `Value` array.
+/// Start one with [`CsvFormat::begin_row`] or [`CsvWriter::write_row_with`].
 ///
 /// Every cell method is [`UnguardedRowWriter`]'s, reached through `Deref` -- see it for the
 /// methods, what they write and what is checked. A `RowWriter` adds one guarantee: **dropping

@@ -80,6 +80,7 @@ the same output -- that is what the guard is for.
 
 The guarded writer's own tests (`unfinished_rows_roll_back_including_unwinding`,
 `writer_reuses_buffer_after_errors_and_cancellation`) are unchanged, and the existing APIs
-(`CsvFormat::row`, the batch writer, `CsvWriter`) run the same instructions as 0.7.0
+(`CsvFormat::row`, the batch writer, `CsvWriter`) measured within a few dozen instructions
+of 0.7.0 in this benchmark
 (`examples/perf_existing.rs`, callgrind, 200,000 rows: row 348,324,215 against 348,324,205;
 batch 346,473,892 against 346,473,869).
