@@ -7,6 +7,8 @@ called out under **Format**.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-08
+
 ### Added
 
 - **`CsvFormat::begin_row_unguarded` and `UnguardedRowWriter`**: the row writer without the
