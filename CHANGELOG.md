@@ -7,6 +7,33 @@ called out under **Format**.
 
 ## [Unreleased]
 
+### Added
+
+- **`CsvFormat::begin_row_unguarded` and `UnguardedRowWriter`**: the row writer without the
+  rollback guard. An unfinished row -- dropped, or abandoned by a panic -- leaves its cells in
+  the output; finished and refused rows behave exactly as with `RowWriter`. For a caller that
+  discards its whole output on any error, where the guard's cost matters: on a 2-CPU x86
+  runner it cost aero1553's whole decode 2.5% and its merge 5%. `RowWriter` is unchanged and
+  stays the default; it is now `UnguardedRowWriter` plus the guard, its cell methods reached
+  through `Deref`, so existing code compiles unchanged. When each is safe, the measurements
+  and the tests: [docs/ROW-WRITER-GUARD.md](docs/ROW-WRITER-GUARD.md).
+
+### Changed
+
+- Faster row-writer cells, same bytes: `hex::<2|4|8>` writes one fixed-size array; a row
+  keeps whether `na_rep` is empty instead of reloading the format for every missing cell; text
+  up to 16 bytes is copied with two overlapping fixed-size copies instead of a `memcpy` call.
+  On the 2-CPU x86 runner aero1553's decode went from 1.065 to 1.043 of its own writer's time
+  with `RowWriter`, and to 1.014-1.016 (merge 1.005-1.006) with `UnguardedRowWriter`. A new test checks text of every length 0-40 against `CsvFormat::row`.
+- The existing APIs are untouched: `examples/perf_existing.rs` under callgrind (200,000 rows)
+  runs the same instructions as 0.7.0 to within ten (row 348,324,215 against 348,324,205;
+  batch 346,473,892 against 346,473,869; writer 346,473,897 against 346,473,887).
+
+### Release scope
+
+- Only `tablekit-csv` advances, to 0.7.1: an addition and faster cells, nothing written
+  changes. tablekit and Parquet stay 0.6.0, tablekit-profile 0.6.1.
+
 ## [0.7.0] - 2026-11-06
 
 ### Release scope and migration
