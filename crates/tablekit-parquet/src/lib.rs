@@ -1,7 +1,7 @@
 //! Writes a [`Batch`] as Parquet, with the types Impala reads: `docs/PARQUET.md`.
 //!
 //! Impala has no unsigned integers, so each unsigned type is written as the next wider signed
-//! one, the same widening `cmm-gen`'s Impala tables use:
+//! one, so a SQL generator using the same profile can declare matching types:
 //!
 //! | tablekit | Parquet (physical, logical) | Impala |
 //! |---|---|---|
@@ -15,7 +15,7 @@
 //! | `F64` | `DOUBLE` | `DOUBLE` |
 //! | `Text` | `BYTE_ARRAY`, `STRING` | `STRING` |
 //!
-//! Every column is optional, so a missing value is a null. Pages are Snappy-compressed.
+//! Every column is optional, so a missing value is a null. Pages use Snappy by default.
 //!
 //! ```
 //! use tablekit::{Batch, Column, Values};

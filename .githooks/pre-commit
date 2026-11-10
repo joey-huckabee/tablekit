@@ -2,8 +2,8 @@
 #
 # Refuses a commit made directly on main.
 #
-# main is treated as protected in this repository (AGENTS.md). Branch protection is not
-# available on this plan for a private repository, so this hook is the only thing enforcing it.
+# main is treated as protected in this repository (AGENTS.md). This local check complements
+# any protections configured on the hosting service.
 #
 # Install once per clone:  git config core.hooksPath .githooks
 # Bypass deliberately:     git commit --no-verify

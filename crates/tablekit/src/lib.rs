@@ -185,9 +185,9 @@ impl Text {
     }
 
     /// A column from text already in one buffer and where each row ends in it, without
-    /// copying: what another one-buffer text column hands over (`cmm-decode`'s
-    /// `TextValues::into_parts`). `None` unless every end is at or after the one before, within
-    /// `buffer`, and on a character boundary.
+    /// copying: transfer ownership of a packed text column's buffer and end offsets.
+    /// `None` unless every end is at or after the one before, within `buffer`, and on a
+    /// character boundary.
     ///
     /// ```
     /// use tablekit::Text;

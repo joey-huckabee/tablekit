@@ -128,7 +128,7 @@ decimal word (`1024`) is not what they compare against.
 | Case | pandas | tablekit | Why |
 |---|---|---|---|
 | A whole-number column with missing values | Converts the column to floats: `5.0`, empty | Keeps whole numbers: `5`, empty | The value is a whole number; `5.0` suggests otherwise. |
-| An `f32` column handed to pandas as Python floats, as FATMOPs-Binary's `to_pandas()` does when some values are missing | `float64` digits: `0.10000000149011612` | `f32` digits: `0.1` | The value is an `f32`. |
+| An `f32` column converted to Python floats before constructing a pandas column | `float64` digits: `0.10000000149011612` | `f32` digits: `0.1` | The value is an `f32`. |
 | A boolean column with missing values | `True`, `False`, empty | The same | No difference. |
 | Line ending on Linux | `\n` | `\r\n` unless `Lf` is chosen | The same bytes on every system. |
 

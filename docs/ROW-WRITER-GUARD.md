@@ -14,8 +14,9 @@ every cell method; they differ only in what happens to a row that is not finishe
 
 `RowWriter` is the default and the right choice unless measurement says otherwise. It is
 `UnguardedRowWriter` plus a guard: every cell method is `UnguardedRowWriter`'s, reached
-through `Deref`, so code written against one type compiles against the other, and a helper
-can take `&mut UnguardedRowWriter` and serve both.
+through `Deref`. Both expose the same cell methods; a helper taking
+`&mut UnguardedRowWriter` can serve both through dereference coercion. The types are not
+interchangeable in every function signature, and their drop behavior remains different.
 
 ## Why the unguarded writer exists
 
@@ -24,21 +25,22 @@ that may unwind -- a growing buffer, a bounds check, a formatter -- so the row c
 back if it panics. In a row of dozens of inlined cells that path is part of the hot loop, and
 it costs time even when nothing panics: it constrains how the cells are compiled.
 
-Measured on aero1553, which writes its 46-column 1553 CSV through the row writer. Its whole
-decode and merge on 256 MiB recordings, on a GitHub-hosted x86 runner with 2 CPUs (one
-rendering thread, so rendering speed sets the pace), against the same decode with
-aero1553's own hand-written writer:
+Historical application-integration measurement: a 46-column protocol-record CSV exporter
+performed whole-input decode and merge on 256 MiB recordings, on a GitHub-hosted x86 runner
+with 2 CPUs and one rendering thread. Ratios compare the same application's pipeline with
+its custom CSV writer; they are not isolated tablekit timings or a promise for other inputs.
+The application-specific harness and recordings are not part of this repository:
 
 | tablekit-csv | decode | merge |
 |---|---|---|
 | 0.7.0 (`RowWriter`) | 1.065, 1.067 | 1.017, 1.018 |
 | 0.7.1 cell changes, `RowWriter` | 1.023, 1.024, 1.026 | 1.051, 1.054, 1.052 |
 | 0.7.1 cell changes, guard removed | 0.999, 1.000, 0.997 | 0.999, 0.999 |
-| 0.7.1, `UnguardedRowWriter` (as aero1553 uses it) | 1.014, 1.015, 1.016 | 1.006, 1.005 |
+| 0.7.1, `UnguardedRowWriter` (application integration) | 1.014, 1.015, 1.016 | 1.006, 1.005 |
 
 The first three rows ran on AMD EPYC runners (9V74 and 7763), the last on an Intel Xeon
 6975P-C: GitHub assigns the CPU, so compare rows within a run rather than across them. The
-output was byte-identical in every run, and aero1553's writer against itself read 1.000
+output was byte-identical in every run, and the custom writer against itself read 1.000
 (range 0.990-1.033). On aarch64 the guard's cost was within noise; the 2-CPU
 x86 runner is where it shows.
 
@@ -51,10 +53,10 @@ Only where an incomplete line can never reach a reader:
 - rows are rendered into a buffer that is written out only after every row in it has
   finished, and thrown away on any error or panic.
 
-aero1553 is both: each worker renders a block of rows into its own buffer, the block is
-written only when complete, and the output file is committed only when the decode succeeds.
-The one way its rendering can fail -- a timestamp the configured calendar cannot represent --
-is detected before the row starts.
+One integration pattern uses both safeguards: render a block into a buffer, write only
+completed blocks, and commit the temporary file only after the entire export succeeds.
+Validate fallible source conversions before starting a row where practical. This does not
+replace the obligation to discard or explicitly truncate output after an abandoned row.
 
 A caller that can recover from an abandoned row may also undo it by hand: note the buffer's
 length before `begin_row_unguarded` and truncate to it.
@@ -78,6 +80,7 @@ the same output -- that is what the guard is for.
 
 The guarded writer's own tests (`unfinished_rows_roll_back_including_unwinding`,
 `writer_reuses_buffer_after_errors_and_cancellation`) are unchanged, and the existing APIs
-(`CsvFormat::row`, the batch writer, `CsvWriter`) run the same instructions as 0.7.0
+(`CsvFormat::row`, the batch writer, `CsvWriter`) measured within a few dozen instructions
+of 0.7.0 in this benchmark
 (`examples/perf_existing.rs`, callgrind, 200,000 rows: row 348,324,215 against 348,324,205;
 batch 346,473,892 against 346,473,869).

@@ -1,9 +1,8 @@
 # tablekit
 
-Writes tables to files in one format, for every tool that needs to: CSV for people and
-spreadsheets, Parquet for Impala. FATMOPs-Binary, sluice and tools still to come build a
-table from their own records and hand it here, so every CSV and every Parquet file looks the
-same whichever tool wrote it. `docs/ARCHITECTURE.md` has the design and the reasons.
+Tablekit is a standalone Rust library for typed tables and consistent CSV/Parquet output.
+Applications supply named columns, missing values and batches or rows; tablekit owns the
+file encoding. See `docs/ARCHITECTURE.md` for the design and integration boundaries.
 
 These are the rules for anyone working in this repository, human or agent. `CLAUDE.md` imports
 this file; keep the rules here, in one place.
@@ -14,6 +13,7 @@ this file; keep the rules here, in one place.
 crates/tablekit          the table model: columns, their types, missing values, batches
 crates/tablekit-csv      the CSV writer
 crates/tablekit-parquet  the Parquet writer
+crates/tablekit-profile  validated SQL/Parquet mappings and templates
 docs/                    ARCHITECTURE.md, CSV-FORMAT.md, PARQUET.md
 .githooks/               local hooks enforcing the Git conventions below
 ROADMAP.md               what comes next, and the analysis behind it
@@ -21,12 +21,14 @@ ROADMAP.md               what comes next, and the analysis behind it
 
 ## Where things belong
 
-- **tablekit knows tables, nothing else.** No captures, no CMM XML, no record formats, no
-  Impala table definitions. A tool turns its own records into a table; tablekit writes it.
-- **Nothing depends back on the users.** FATMOPs-Binary, sluice and later tools depend on
-  tablekit, pinned to a commit; tablekit depends on none of them.
-- **No Python here.** Each tool's Python package exposes its own export as a thin layer over
-  Rust. The output must not depend on which language asked for it.
+- **tablekit knows tables, not application formats.** Input parsing, decoding, clock
+  interpretation and SQL statement generation belong in callers. Profiles expose validated
+  target mappings; their current restrictions are documented in `docs/PROFILES.md`.
+- **Dependencies point toward tablekit.** The library does not depend on applications that
+  use it. Keep the model independent of writer-specific and application-specific types.
+- **Runtime implementation is Rust.** There is no Python package here. Fixture-generation
+  scripts may use pandas/NumPy as independent references; runtime output must not depend on
+  a caller's language bindings.
 
 ## The formats are contracts
 
@@ -35,8 +37,8 @@ ROADMAP.md               what comes next, and the analysis behind it
   the document, the expected files under `testdata/expected/` and `CHANGELOG.md` change in the
   same pull request, and the change is called out for every user.
 - **CSV matches what pandas writes by default** (`DataFrame.to_csv(path, index=False)`, on
-  Windows), because that is what the users already open: decided with the owner on
-  2026-10-18. Where tablekit deliberately differs, `CSV-FORMAT.md` says where and why.
+  Windows), the compatibility baseline established on 2026-10-18. Where tablekit deliberately
+  differs, `CSV-FORMAT.md` says where and why.
 - **Booleans are booleans**: `True` and `False` in CSV, `BOOLEAN` in Parquet. Never `1` and
   `0`.
 - **Expected-file tests are the proof.** Every rule in a format document has a case in the
@@ -77,12 +79,12 @@ ROADMAP.md               what comes next, and the analysis behind it
 
 ## Testing
 
-GitHub Actions runs the Rust checks on pull requests and `main`, with a weekly dependency
-audit. The owner approved CI for this private repository, replacing the earlier no-CI rule.
-Run the checks yourself before pushing; the commands are in `README.md` and the matrix and
-security policy are in `docs/CI.md`. Use only the repository's synthetic fixtures: CI must
-not fetch production data, reference repositories or secrets, publish packages or releases,
-or require external analysis services.
+GitHub Actions runs checks on pull requests and `main`, plus a weekly dependency audit.
+The commands are in `README.md`; the matrix and security policy are in `docs/CI.md`.
+Run relevant checks locally before pushing. Runtime changes need the full documented checks;
+prose-only changes need terminology/link checks and validation of changed runnable examples.
+Check Rustdoc when API documentation changes. CI uses synthetic fixtures, without external
+application data, configured secrets, publishing or analysis-service credentials.
 
 ## Git conventions
 
@@ -93,9 +95,8 @@ or require external analysis services.
   documentation. This holds even if an agent's default instructions suggest it, and overrides
   any default trailer or footer behavior.
 - **`main` is treated as protected.** Land work through a pull request; never commit or push to
-  it directly. GitHub will not stop you on a private repository, so treat `main` as protected
-  regardless of what the remote permits. (The repository's first commit, which holds these
-  rules and the hooks, is the one exception: a pull request needs a `main` to target.)
+  it directly, regardless of which protections the hosting service enforces. Keep changes
+  reviewable, preserve other contributors' work, and describe validation in the pull request.
 - **Line endings are LF**, in the repository and the working tree (`.gitattributes`). The CSV
   files tablekit *writes* end their lines with CRLF; the expected files are kept byte for byte
   (`testdata/** -text`).
