@@ -106,4 +106,8 @@ application data, configured secrets, publishing or analysis-service credentials
   git config core.hooksPath .githooks
   ```
 
-  `pre-commit` refuses a commit on `main`; `commit-msg` refuses a tool-attribution trailer.
+  `pre-commit` refuses a commit on `main` and rejects CRLF in staged text. It requires
+  Python 3 (`python` preferred, otherwise `python3`) and checks the index without changing
+  files. Staged `-text`/binary and intentional `eol=crlf` exceptions are preserved, including
+  the byte-exact files under `testdata/`. `commit-msg` refuses a tool-attribution trailer.
+  Run the synthetic hook tests with `python3 -m unittest discover -s tests -v`.

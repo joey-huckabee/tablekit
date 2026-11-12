@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Refuses a commit made directly on main.
+# Refuses commits on main and CRLF in staged text.
 #
 # main is treated as protected in this repository (AGENTS.md). This local check complements
 # any protections configured on the hosting service.
@@ -30,6 +30,16 @@ if [ "$branch" = "main" ]; then
     "      gh pr create" \
     "" \
     "  Deliberate? Commit again with --no-verify." >&2
+  exit 1
+fi
+
+# Prefer python: the Windows python3 alias may exist but fail to launch.
+if command -v python >/dev/null 2>&1; then
+  python .githooks/check_line_endings.py
+elif command -v python3 >/dev/null 2>&1; then
+  python3 .githooks/check_line_endings.py
+else
+  printf '%s\n' 'pre-commit: Python 3 is required for the staged LF check (python or python3).' >&2
   exit 1
 fi
 
